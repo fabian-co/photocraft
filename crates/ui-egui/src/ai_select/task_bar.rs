@@ -35,7 +35,8 @@ pub(crate) struct Bar {
     error: Option<String>,
 }
 
-/// OpenAI's `quality`.
+/// OpenAI's `quality`. The base GPT Image models take Auto to High; gpt-image-2.5 and later
+/// (Sunburst, Flare) also take Extra High and Max.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Quality {
     #[default]
@@ -43,17 +44,24 @@ pub(crate) enum Quality {
     Low,
     Medium,
     High,
+    XHigh,
+    Max,
 }
 
-impl Quality {
-    const ALL: [Quality; 4] = [Quality::Auto, Quality::Low, Quality::Medium, Quality::High];
+/// The qualities of the base GPT Image models.
+const BASE_QUALITIES: &[Quality] = &[Quality::Auto, Quality::Low, Quality::Medium, Quality::High];
+/// gpt-image-2.5 and later.
+const ALL_QUALITIES: &[Quality] = &[Quality::Auto, Quality::Low, Quality::Medium, Quality::High, Quality::XHigh, Quality::Max];
 
+impl Quality {
     fn id(self) -> &'static str {
         match self {
             Quality::Auto => "auto",
             Quality::Low => "low",
             Quality::Medium => "medium",
             Quality::High => "high",
+            Quality::XHigh => "xhigh",
+            Quality::Max => "max",
         }
     }
 
@@ -63,6 +71,8 @@ impl Quality {
             Quality::Low => tl!("Low"),
             Quality::Medium => tl!("Medium"),
             Quality::High => tl!("High"),
+            Quality::XHigh => tl!("Extra high"),
+            Quality::Max => tl!("Maximum"),
         }
     }
 }
@@ -93,7 +103,8 @@ pub(crate) enum Sizes {
 /// What can be asked of a model besides the prompt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Profile {
-    pub qualities: bool,
+    /// The qualities it takes; none when it takes no `quality`.
+    pub qualities: &'static [Quality],
     pub sizes: Sizes,
 }
 
@@ -108,23 +119,27 @@ const MAX_RATIO: f64 = 3.0;
 /// What Auto aims for with a model that takes any size: 1536 × 1024's pixel count.
 const AUTO_PIXELS: f64 = 1_572_864.0;
 
-/// The model's version after `gpt-image-`: `2` for `gpt-image-2-2026-04-21`, `1` for `gpt-image-1.5`.
-fn gpt_image_major(model: &str) -> Option<u32> {
+/// The model's version after `gpt-image-`: `(2, 0)` for `gpt-image-2-2026-04-21`, `(1, 5)` for
+/// `gpt-image-1.5`, `(2, 5)` for `gpt-image-2.5-flare`.
+fn gpt_image_version(model: &str) -> Option<(u32, u32)> {
     let lower = model.to_ascii_lowercase();
     let rest = &lower[lower.find("gpt-image-")? + "gpt-image-".len()..];
-    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-    digits.parse().ok()
+    let major: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    let after = &rest[major.len()..];
+    let minor: String = after.strip_prefix('.').map(|m| m.chars().take_while(char::is_ascii_digit).collect()).unwrap_or_default();
+    Some((major.parse().ok()?, minor.parse().unwrap_or(0)))
 }
 
 /// What the model `model` (its id) takes, as OpenAI documents it.
 pub(crate) fn profile(model: &str) -> Profile {
     let lower = model.to_ascii_lowercase();
-    match gpt_image_major(&lower) {
-        Some(major) if major >= 2 => Profile { qualities: true, sizes: Sizes::Free },
-        Some(_) => Profile { qualities: true, sizes: Sizes::Fixed(GPT_IMAGE_1_SIZES) },
-        None if lower.contains("chatgpt-image") => Profile { qualities: true, sizes: Sizes::Fixed(GPT_IMAGE_1_SIZES) },
-        None if lower.contains("dall-e-2") => Profile { qualities: false, sizes: Sizes::Fixed(DALL_E_2_SIZES) },
-        None => Profile { qualities: false, sizes: Sizes::Unknown },
+    match gpt_image_version(&lower) {
+        Some(v) if v >= (2, 5) => Profile { qualities: ALL_QUALITIES, sizes: Sizes::Free },
+        Some(v) if v >= (2, 0) => Profile { qualities: BASE_QUALITIES, sizes: Sizes::Free },
+        Some(_) => Profile { qualities: BASE_QUALITIES, sizes: Sizes::Fixed(GPT_IMAGE_1_SIZES) },
+        None if lower.contains("chatgpt-image") => Profile { qualities: BASE_QUALITIES, sizes: Sizes::Fixed(GPT_IMAGE_1_SIZES) },
+        None if lower.contains("dall-e-2") => Profile { qualities: &[], sizes: Sizes::Fixed(DALL_E_2_SIZES) },
+        None => Profile { qualities: &[], sizes: Sizes::Unknown },
     }
 }
 
@@ -370,7 +385,7 @@ fn fill_panel(ui: &mut Ui, bar: &mut Bar, status: Option<&AiSelectStatus>, canva
     if prompt.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.command) {
         pressed = Some(Pressed::Generate);
     }
-    let profile = current.as_ref().map_or(Profile { qualities: false, sizes: Sizes::Unknown }, |m| profile(&m.model));
+    let profile = current.as_ref().map_or(Profile { qualities: &[], sizes: Sizes::Unknown }, |m| profile(&m.model));
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
         ui.label(tl!("Model"));
@@ -383,10 +398,14 @@ fn fill_panel(ui: &mut Ui, bar: &mut Bar, status: Option<&AiSelectStatus>, canva
         {
             pressed = Some(Pressed::Model(m.connection.clone(), m.model.clone()));
         }
-        if profile.qualities {
+        if !profile.qualities.is_empty() {
+            // A quality the new model doesn't take goes back to Automatic.
+            if !profile.qualities.contains(&bar.quality) {
+                bar.quality = Quality::Auto;
+            }
             ui.add_space(6.0);
             ui.label(tl!("Quality"));
-            let options: Vec<(Quality, &str)> = Quality::ALL.iter().map(|q| (*q, q.label())).collect();
+            let options: Vec<(Quality, &str)> = profile.qualities.iter().map(|q| (*q, q.label())).collect();
             crate::widgets::dropdown_literal(ui, "photocraft-task-bar-quality", tl!("Quality"), &mut bar.quality, &options, 110.0);
         }
         if profile.sizes != Sizes::Unknown {
@@ -463,8 +482,11 @@ fn apply(app: &mut PhotocraftApp, ctx: &egui::Context, pressed: Pressed, canvas:
         }
         Pressed::Generate => {
             let current = bar.models.as_ref().and_then(|(_, m)| m.iter().find(|m| m.selected).cloned());
-            let profile = current.as_ref().map_or(Profile { qualities: false, sizes: Sizes::Unknown }, |m| profile(&m.model));
-            let options = FillOptions { quality: profile.qualities.then(|| bar.quality.id().to_string()), size: resolve(profile, bar.size, canvas) };
+            let profile = current.as_ref().map_or(Profile { qualities: &[], sizes: Sizes::Unknown }, |m| profile(&m.model));
+            let options = FillOptions {
+                quality: profile.qualities.contains(&bar.quality).then(|| bar.quality.id().to_string()),
+                size: resolve(profile, bar.size, canvas),
+            };
             let prompt = bar.prompt.clone();
             match super::start_fill(app, &prompt, options) {
                 Ok(_) => {
@@ -486,13 +508,18 @@ mod tests {
 
     #[test]
     fn models_get_the_options_openai_documents() {
-        assert_eq!(profile("gpt-image-2"), Profile { qualities: true, sizes: Sizes::Free });
-        assert_eq!(profile("gpt-image-2.5-flare-2026-09-08"), Profile { qualities: true, sizes: Sizes::Free });
-        assert_eq!(profile("gpt-image-1.5"), Profile { qualities: true, sizes: Sizes::Fixed(GPT_IMAGE_1_SIZES) });
-        assert_eq!(profile("gpt-image-1-mini"), Profile { qualities: true, sizes: Sizes::Fixed(GPT_IMAGE_1_SIZES) });
-        assert_eq!(profile("chatgpt-image-latest"), Profile { qualities: true, sizes: Sizes::Fixed(GPT_IMAGE_1_SIZES) });
-        assert_eq!(profile("dall-e-2"), Profile { qualities: false, sizes: Sizes::Fixed(DALL_E_2_SIZES) });
-        assert_eq!(profile("flux-fill"), Profile { qualities: false, sizes: Sizes::Unknown });
+        assert_eq!(profile("gpt-image-2"), Profile { qualities: BASE_QUALITIES, sizes: Sizes::Free });
+        assert_eq!(profile("gpt-image-2-2026-04-21"), Profile { qualities: BASE_QUALITIES, sizes: Sizes::Free });
+        assert_eq!(profile("gpt-image-2.5-flare-2026-09-08"), Profile { qualities: ALL_QUALITIES, sizes: Sizes::Free });
+        assert_eq!(profile("gpt-image-2.5-sunburst"), Profile { qualities: ALL_QUALITIES, sizes: Sizes::Free });
+        assert_eq!(profile("gpt-image-2.6-flare"), Profile { qualities: ALL_QUALITIES, sizes: Sizes::Free });
+        assert_eq!(profile("gpt-image-1.5"), Profile { qualities: BASE_QUALITIES, sizes: Sizes::Fixed(GPT_IMAGE_1_SIZES) });
+        assert_eq!(profile("gpt-image-1-mini"), Profile { qualities: BASE_QUALITIES, sizes: Sizes::Fixed(GPT_IMAGE_1_SIZES) });
+        assert_eq!(profile("chatgpt-image-latest"), Profile { qualities: BASE_QUALITIES, sizes: Sizes::Fixed(GPT_IMAGE_1_SIZES) });
+        assert_eq!(profile("dall-e-2"), Profile { qualities: &[], sizes: Sizes::Fixed(DALL_E_2_SIZES) });
+        assert_eq!(profile("flux-fill"), Profile { qualities: &[], sizes: Sizes::Unknown });
+        assert_eq!(Quality::XHigh.id(), "xhigh");
+        assert_eq!(Quality::Max.id(), "max");
     }
 
     fn multiple_of_16(s: [u32; 2]) -> bool {
