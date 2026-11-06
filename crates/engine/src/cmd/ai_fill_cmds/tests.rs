@@ -38,15 +38,41 @@ fn generative_fill_needs_a_selection_and_says_it_needs_a_model_headless() {
 fn the_fill_source_masks_the_selection_as_transparent() {
     let mut s = session(40, 20);
     s.execute("select.rect", json!({"x": 0, "y": 0, "width": 20, "height": 20})).unwrap();
-    // Smaller than the shortest allowed side, so it is sent at its own size.
+    // 40 × 20 rounds to the nearest multiples of 16: 48 × 16.
     let v = s.execute("edit.aiFillSource", json!({})).unwrap();
-    assert_eq!((v["width"].as_u64(), v["height"].as_u64()), (Some(40), Some(20)));
+    assert_eq!((v["width"].as_u64(), v["height"].as_u64()), (Some(48), Some(16)));
     let picture = decode(&v, "png");
     let mask = decode(&v, "mask").to_rgba8();
-    assert_eq!((picture.width(), picture.height()), (40, 20));
-    let alpha = |x: usize, y: usize| mask[(y * 40 + x) * 4 + 3];
-    assert_eq!(alpha(5, 10), 0, "selected: transparent");
-    assert_eq!(alpha(35, 10), 255, "outside: opaque");
+    assert_eq!((picture.width(), picture.height()), (48, 16));
+    let alpha = |x: usize, y: usize| mask[(y * 48 + x) * 4 + 3];
+    assert_eq!(alpha(6, 8), 0, "selected: transparent");
+    assert_eq!(alpha(42, 8), 255, "outside: opaque");
+}
+
+#[test]
+fn an_asked_size_is_rounded_to_multiples_of_16() {
+    let mut s = session(300, 200);
+    s.execute("select.all", json!({})).unwrap();
+    let v = s.execute("edit.aiFillSource", json!({"width": 1000, "height": 700})).unwrap();
+    assert_eq!((v["width"].as_u64(), v["height"].as_u64()), (Some(1008), Some(704)));
+    let picture = decode(&v, "png");
+    assert_eq!((picture.width(), picture.height()), (1008, 704));
+    // A large canvas is scaled to the longest side first, then rounded.
+    let mut s = session(3000, 1999);
+    s.execute("select.all", json!({})).unwrap();
+    let v = s.execute("edit.aiFillSource", json!({})).unwrap();
+    assert_eq!((v["width"].as_u64(), v["height"].as_u64()), (Some(1536), Some(1024)));
+    assert!(s.execute("edit.aiFillSource", json!({"width": 512})).is_err(), "one side alone is refused");
+}
+
+#[test]
+fn sides_round_to_the_nearest_step() {
+    assert_eq!(round_side(1.0), 16);
+    assert_eq!(round_side(23.9), 16);
+    assert_eq!(round_side(24.0), 32);
+    assert_eq!(round_side(1023.0), 1024);
+    assert_eq!(round_side(f64::NAN), 16);
+    assert_eq!(round_side(1e9), 4096);
 }
 
 #[test]

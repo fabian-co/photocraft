@@ -18,6 +18,8 @@ use crate::{PhotocraftApp, state::DialogKind};
 use base64::Engine as _;
 use serde_json::{Map, Value, json};
 
+pub(crate) mod task_bar;
+
 const MARK: &str = "__aiSelectConsent";
 /// What a text-reading model is told to find; models that select by clicking get the hint box.
 const PROMPT: &str = "the main subject";
@@ -53,6 +55,30 @@ pub struct AiFillRequest {
     pub mask: Vec<u8>,
     /// The person's description.
     pub prompt: String,
+    /// The model's `quality` (`auto`, `low`, `medium`, `high`), when the person chose one.
+    pub quality: Option<String>,
+    /// The size asked of the model, `[width, height]`: the picture and the mask are this size,
+    /// both sides multiples of 16.
+    pub size: Option<[u32; 2]>,
+}
+
+/// A model that can do Generative Fill, for the task bar's model list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AiModelChoice {
+    /// The connection and the model, as [`AiSelect::choose_fill_model`] takes them.
+    pub connection: String,
+    pub model: String,
+    /// What the list shows.
+    pub label: String,
+    /// The one Generative Fill uses now.
+    pub selected: bool,
+}
+
+/// What the task bar adds to a Generative Fill request.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FillOptions {
+    pub quality: Option<String>,
+    pub size: Option<[u32; 2]>,
 }
 
 /// What a job is for: a selection or a fill.
@@ -219,6 +245,14 @@ pub trait AiSelect {
     fn start_fill(&self, _request: AiFillRequest, _consent: Option<AiConsentTerm>) -> Result<AiSelectStart, String> {
         Err(tl!("Generative Fill needs an AI image model").into())
     }
+    /// The models Generative Fill can use, for the task bar. None by default.
+    fn fill_models(&self) -> Vec<AiModelChoice> {
+        Vec::new()
+    }
+    /// Makes Generative Fill use this model (shared with the other Craft apps).
+    fn choose_fill_model(&self, _connection: &str, _model: &str) -> Result<(), String> {
+        Err(tl!("Generative Fill needs an AI image model").into())
+    }
     /// Draws the service's part of Edit › Preferences › Integrations: which model Select Subject
     /// uses and, for a model that runs on this computer, getting its files. Choices are shared
     /// with the other Craft apps and apply at once, not on OK. Nothing is drawn by default.
@@ -245,6 +279,8 @@ pub(crate) struct Pending {
     running: Option<Running>,
     /// The request the open consent prompt is about (too big for the dialog's fields).
     awaiting: Option<Awaiting>,
+    /// The Contextual Task Bar under the selection.
+    bar: task_bar::Bar,
 }
 
 struct Running {
@@ -394,9 +430,27 @@ pub fn ok_label(fields: &Map<String, Value>) -> &'static str {
 
 /// Generative Fill's prompt was confirmed: the picture and the selection go to the model.
 fn confirm_fill(app: &mut PhotocraftApp, fields: &Map<String, Value>) -> Result<Value, String> {
-    let model = fields.get("model").and_then(Value::as_str).unwrap_or_default().to_string();
-    let typed = fields.get("prompt").and_then(Value::as_str).unwrap_or_default().trim().to_string();
-    let source = app.run_command("edit.aiFillSource", json!({}))?;
+    let typed = fields.get("prompt").and_then(Value::as_str).unwrap_or_default().to_string();
+    start_fill(app, &typed, FillOptions::default())
+}
+
+/// Sends the picture and the selection to the chosen model with `typed` (empty: match the
+/// surroundings) and the task bar's options.
+pub(crate) fn start_fill(app: &mut PhotocraftApp, typed: &str, options: FillOptions) -> Result<Value, String> {
+    let Some(service) = app.services.ai_select.as_ref() else { return Err(tl!("Generative Fill needs an AI image model").into()) };
+    let model = match service.fill_status() {
+        AiSelectStatus::Ready { model } => model,
+        AiSelectStatus::Unavailable { reason } => return Err(reason),
+    };
+    if app.ai_select.running.is_some() {
+        return Err(tl!("An AI job is already running").into());
+    }
+    let typed = typed.trim().to_string();
+    let params = match options.size {
+        Some([w, h]) => json!({"width": w, "height": h}),
+        None => json!({}),
+    };
+    let source = app.run_command("edit.aiFillSource", params)?;
     let decode = |key: &str| source.get(key).and_then(Value::as_str).and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok());
     let (Some(png), Some(mask)) = (decode("png"), decode("mask")) else {
         return Err(tl!("The picture could not be prepared for the AI model").into());
@@ -404,7 +458,9 @@ fn confirm_fill(app: &mut PhotocraftApp, fields: &Map<String, Value>) -> Result<
     let document = source.get("document").and_then(Value::as_u64).unwrap_or(0);
     let name = if typed.is_empty() { "Generative Fill".to_string() } else { typed.chars().take(60).collect() };
     let prompt = if typed.is_empty() { BLEND_PROMPT.to_string() } else { typed };
-    let request = AiFillRequest { png, mask, prompt };
+    // What the engine actually made (both sides multiples of 16) is what the model is asked for.
+    let sent = options.size.and_then(|_| Some([source.get("width")?.as_u64()? as u32, source.get("height")?.as_u64()? as u32]));
+    let request = AiFillRequest { png, mask, prompt, quality: options.quality, size: sent };
     begin(app, Request::Fill(request), Job { kind: Kind::Fill, document, mode: Value::Null, model, name }, None)
 }
 

@@ -1351,6 +1351,8 @@ fn paint_primary_overlays(app: &mut PhotocraftApp, ui: &mut egui::Ui, view: &mut
     crate::slice_ui::draw_overlay(app, painter, xf);
     crate::frame_tool::draw_overlay(app, painter, xf);
     crate::artboard_tool::draw_overlay(app, painter, xf);
+    // The Contextual Task Bar under the selection (Generative Fill and the like).
+    crate::ai_select::task_bar::show(app, ctx, xf, idx, input.tool, response.dragged() || response.is_pointer_button_down_on());
 
     draw_canvas_tool_cursor(app, ui, input, resizing);
 }

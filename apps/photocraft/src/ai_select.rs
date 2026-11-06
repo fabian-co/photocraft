@@ -16,7 +16,7 @@ use craft_ai_client::{AiClient, Plan, RoleStatus};
 use craft_ai_core::segment::{self, Area, Click};
 use craft_ai_core::{AppId, ConsentLedger, ConsentTerm, ErrorKind, Event, InputRole, JobState, Payload, PayloadKind, Request, Role};
 use photocraft_ui_egui::ai_select::{
-    AiConsentAsk, AiConsentTerm, AiFillRequest, AiJobPoll, AiSelect, AiSelectJob, AiSelectRequest, AiSelectStart, AiSelectStatus,
+    AiConsentAsk, AiConsentTerm, AiFillRequest, AiJobPoll, AiModelChoice, AiSelect, AiSelectJob, AiSelectRequest, AiSelectStart, AiSelectStatus,
 };
 
 mod settings;
@@ -86,8 +86,43 @@ impl AiSelect for CraftAiSelect {
             .with_input(InputRole::Source, picture)
             .with_input(InputRole::Mask, mask)
             .with_input(InputRole::Prompt, Payload::text(r.prompt));
+        // The task bar's choices, as OpenAI's images endpoints take them.
+        let request = match r.size {
+            Some([w, h]) => request.with_param("size", serde_json::json!(format!("{w}x{h}"))),
+            None => request,
+        };
+        let request = match r.quality {
+            Some(quality) => request.with_param("quality", serde_json::json!(quality)),
+            None => request,
+        };
         let plan = self.client.plan(role, request).map_err(|e| e.message)?;
         self.launch(plan, consent, Wants::Picture)
+    }
+
+    fn fill_models(&self) -> Vec<AiModelChoice> {
+        let Some(role) = &self.fill_role else { return Vec::new() };
+        let current = match self.client.status(role) {
+            RoleStatus::Ready(ready) => Some((ready.connection, ready.model)),
+            RoleStatus::Unavailable { .. } => None,
+        };
+        let Ok(choices) = self.client.choices(role) else { return Vec::new() };
+        let several = choices.iter().any(|c| choices.iter().any(|o| o.connection != c.connection));
+        choices
+            .into_iter()
+            .map(|c| AiModelChoice {
+                selected: current.as_ref().is_some_and(|(conn, model)| *conn == c.connection && *model == c.model),
+                label: if several { format!("{} · {}", c.model_label, c.connection_label) } else { c.model_label },
+                connection: c.connection.as_str().to_owned(),
+                model: c.model.as_str().to_owned(),
+            })
+            .collect()
+    }
+
+    fn choose_fill_model(&self, connection: &str, model: &str) -> Result<(), String> {
+        let role = self.fill_role.as_ref().ok_or("This version of PhotoCraft has no Generative Fill tool.")?;
+        let connection = craft_ai_core::ConnectionId::new(connection).map_err(|e| e.to_string())?;
+        let model = craft_ai_core::ModelId::new(model).map_err(|e| e.to_string())?;
+        settings::choose(&self.app, role, &connection, &model)
     }
 
     fn preferences_ui(&mut self, ui: &mut egui::Ui) {

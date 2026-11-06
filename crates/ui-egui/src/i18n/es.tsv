@@ -4543,3 +4543,11 @@ smartSvg	AI/PDF/EPS contents will be edited as SVG. Saving replaces the embedded
 	The service answered, but it has no models PhotoCraft knows.	El servicio respondió, pero no tiene modelos que PhotoCraft conozca.
 	The service did not answer: {problem}. Check the key and try again.	El servicio no respondió: {problem}. Revisa la clave e inténtalo de nuevo.
 	Change the key	Cambiar la clave
+	Canvas size	Tamaño del lienzo
+	Generating with {model}…	Generando con {model}…
+	Choose a model…	Elegir un modelo…
+	Describe what should appear in the selection (leave it empty to match its surroundings)	Describe lo que debe aparecer en la selección (déjalo vacío para que combine con lo que la rodea)
+	Sent at {size} px (multiples of 16)	Se envía a {size} px (múltiplos de 16)
+	Sent at the canvas's proportions, rounded to multiples of 16	Se envía con las proporciones del lienzo, redondeadas a múltiplos de 16
+	Ctrl+Enter	Ctrl+Intro
+	An AI job is already running	Ya hay un trabajo de IA en curso

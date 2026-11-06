@@ -18,6 +18,17 @@ use crate::{EngineError, Result, Session};
 
 /// Longest side of the picture sent to an image model (OpenAI's edits accept up to 1536 px).
 const MAX_SIDE: u32 = 1536;
+/// Image models work on blocks of 16 pixels: every side sent is a multiple of this.
+pub const SIDE_STEP: u32 = 16;
+/// The largest side that can be asked for.
+const MAX_ASKED: u32 = 4096;
+
+/// `v` rounded to the nearest multiple of [`SIDE_STEP`], at least one step and at most
+/// [`MAX_ASKED`].
+pub fn round_side(v: f64) -> u32 {
+    let steps = if v.is_finite() { (v / f64::from(SIDE_STEP)).round() } else { 1.0 };
+    (steps.clamp(1.0, f64::from(MAX_ASKED / SIDE_STEP)) as u32) * SIDE_STEP
+}
 
 fn bad(cmd: &str, msg: &str) -> EngineError {
     EngineError::BadParams { cmd: cmd.into(), msg: msg.into() }
@@ -50,7 +61,9 @@ fn encode_png(cmd: &str, w: u32, h: u32, rgba: &[u8]) -> Result<String> {
 }
 
 /// The picture (the composite, or the active layer) and the selection as an image model reads
-/// them: two RGBA PNGs of the same size, at most `maxSide` on the longest side. The mask is
+/// them: two RGBA PNGs of the same size. That size is `width` × `height` when given, else the
+/// canvas scaled to at most `maxSide` on the longest side; either way both sides are rounded to
+/// a multiple of 16 ([`round_side`]), stretching the picture a little if need be. The mask is
 /// transparent where the model should paint (the selection) and opaque elsewhere.
 fn fill_source(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "edit.aiFillSource";
@@ -64,14 +77,21 @@ fn fill_source(s: &mut Session, p: &Value) -> Result<Value> {
     if sw == 0 || sh == 0 {
         return Err(bad(CMD, "the document is empty"));
     }
-    let scale = (f64::from(max_side) / f64::from(sw.max(sh))).min(1.0);
-    let w = ((f64::from(sw) * scale).round() as u32).max(1);
-    let h = ((f64::from(sh) * scale).round() as u32).max(1);
+    let asked = |key: &str| p.get(key).and_then(Value::as_f64);
+    let (w, h) = match (asked("width"), asked("height")) {
+        (Some(w), Some(h)) => (round_side(w), round_side(h)),
+        (None, None) => {
+            let scale = (f64::from(max_side) / f64::from(sw.max(sh))).min(1.0);
+            (round_side(f64::from(sw) * scale), round_side(f64::from(sh) * scale))
+        }
+        _ => return Err(bad(CMD, "give both width and height, or neither")),
+    };
+    let (scale_x, scale_y) = (f64::from(w) / f64::from(sw), f64::from(h) / f64::from(sh));
     let len = (w as usize).saturating_mul(h as usize).saturating_mul(4);
     let mut picture = vec![0u8; len];
     let mut mask = vec![0u8; len];
-    let source_x = |x: u32| (((f64::from(x) + 0.5) / scale) as i32).min(sw as i32 - 1);
-    let source_y = |y: u32| (((f64::from(y) + 0.5) / scale) as i32).min(sh as i32 - 1);
+    let source_x = |x: u32| (((f64::from(x) + 0.5) / scale_x) as i32).min(sw as i32 - 1);
+    let source_y = |y: u32| (((f64::from(y) + 0.5) / scale_y) as i32).min(sh as i32 - 1);
     with_doc_sampler(&d.doc, d.active_layer, all_layers, |smp, _| {
         for y in 0..h {
             let sy = bounds.y0 + source_y(y);
@@ -179,7 +199,7 @@ pub fn specs() -> Vec<CommandSpec> {
             label: "Generative Fill Source",
             menu: &[],
             shortcut: None,
-            params: r##"{"sampleAllLayers":bool=true,"maxSide":64..4096=1536} → {png,mask,width,height,document} (RGBA PNGs, base64; the mask is transparent where the selection is)"##,
+            params: r##"{"sampleAllLayers":bool=true,"maxSide":64..4096=1536,"width":px?,"height":px?} → {png,mask,width,height,document} (RGBA PNGs, base64, both sides multiples of 16; the mask is transparent where the selection is)"##,
             enabled,
             run: fill_source,
             journal: false,

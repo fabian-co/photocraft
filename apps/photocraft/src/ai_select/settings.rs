@@ -699,6 +699,11 @@ fn folders() -> Result<FolderDesk, String> {
 }
 
 /// Choices made here are the suite's: the same store every Craft app reads.
+/// Makes `role` use `model` of `connection` in every Craft app (the task bar's model list).
+pub(crate) fn choose(app: &AppId, role: &Role, connection: &ConnectionId, model: &ModelId) -> Result<(), String> {
+    desk(app).and_then(|d| d.choose(role, connection, model)).map_err(|e| e.message)
+}
+
 fn desk(app: &AppId) -> Result<ToolDesk, AiError> {
     let client = AiClient::standard(app.clone())?;
     let shared = SharedStore::at_default_location().map_err(|e| AiError::invalid(e.to_string()))?;
