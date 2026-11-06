@@ -529,7 +529,7 @@ fn ok_label(d: &Dialog) -> &'static str {
     } else if crate::delete_layer_prompt::owns(&d.fields) {
         tl!("Delete")
     } else if crate::ai_select::owns(&d.fields) {
-        tl!("Send")
+        crate::ai_select::ok_label(&d.fields)
     } else if crate::disk_change_prompt::owns(&d.fields) || crate::replace_prompt::owns(&d.fields) {
         tl!("Replace")
     } else if d.fields.contains_key("__export") {

@@ -53,6 +53,7 @@ pub mod actions_cmds;
 pub mod actions_edit_cmds;
 pub mod adjust_cmds;
 mod adjust_params;
+pub mod ai_fill_cmds;
 pub mod align_cmds;
 pub mod analysis_cmds;
 pub mod artboard_cmds;
@@ -1306,6 +1307,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::path_edit_cmds::specs());
     v.extend(crate::smartselect_cmds::specs());
     v.extend(crate::cutout_cmds::specs());
+    v.extend(crate::ai_fill_cmds::specs());
     v.extend(crate::symmetry_cmds::specs());
     v.extend(crate::edit_cmds::specs());
     v.extend(crate::smart_svg_cmds::specs());

@@ -715,6 +715,9 @@ fn ai_source_is_a_scaled_png_with_a_subject_hint() {
     assert_eq!((image.width(), image.height()), (100, 80));
     let hint: Vec<f64> = v["box"].as_array().unwrap().iter().map(|n| n.as_f64().unwrap()).collect();
     assert!(hint[0] < 0.5 && hint[2] > 0.5 && hint[1] < 0.5 && hint[3] > 0.5, "{hint:?}");
+    // The canvas it covers, for turning canvas pixels into fractions.
+    let bounds = s.active().unwrap().doc.bounds();
+    assert_eq!(v["canvas"], json!([bounds.x0, bounds.y0, bounds.width(), bounds.height()]));
     assert!(s.active().unwrap().doc.selection.is_none());
 }
 

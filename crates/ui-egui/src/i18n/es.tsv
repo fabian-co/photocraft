@@ -4449,4 +4449,89 @@ smartSvg	AI/PDF/EPS contents will be edited as SVG. Saving replaces the embedded
 	Selected {name} with {model}	{name} seleccionado con {model}
 	Subject selected with {model}	Sujeto seleccionado con {model}
 	AI models	Modelos de IA
-	Select › Subject uses the model chosen here. The choice is shared with the other Craft apps and applies at once.	Selección › Sujeto usa el modelo elegido aquí. La elección se comparte con las demás apps Craft y se aplica al instante.
+	PhotoCraft's AI tools use the models chosen here. Choices are shared with the other Craft apps and apply at once.	Las herramientas de IA de PhotoCraft usan los modelos elegidos aquí. Las elecciones se comparten con las demás apps Craft y se aplican al instante.
+	{tool} uses {model}.	{tool} usa {model}.
+	{tool} uses PhotoCraft's own selection: no AI model is chosen yet.	{tool} usa la selección propia de PhotoCraft: todavía no hay un modelo de IA elegido.
+	{tool} needs an AI model: choose or set one up below.	{tool} necesita un modelo de IA: elige o configura uno abajo.
+	Add an online service (OpenAI, Gemini…)	Añadir un servicio en línea (OpenAI, Gemini…)
+	Saved. Every Craft app uses this model for this tool now.	Guardado. Todas las apps Craft usan ahora este modelo para esta herramienta.
+	This model is not in this version of PhotoCraft.	Este modelo no está en esta versión de PhotoCraft.
+	That service is no longer saved.	Ese servicio ya no está guardado.
+	Online service	Servicio en línea
+	Your key is kept in this computer's keychain and is only read when a job is sent. The service bills you for what you use.	Tu clave se guarda en el llavero de este equipo y solo se lee al enviar un trabajo. El servicio te cobra lo que uses.
+	Service saved. Its models are in the list now.	Servicio guardado. Sus modelos ya están en la lista.
+	The model is ready, and every Craft app uses it for this tool now.	El modelo está listo y todas las apps Craft lo usan ahora para esta herramienta.
+	The model is ready. Your earlier choice was kept: pick the new model in the list to use it.	El modelo está listo. Se mantuvo tu elección anterior: elige el modelo nuevo en la lista para usarlo.
+	Find model files	Buscar archivos del modelo
+	Save model files to	Guardar los archivos del modelo en
+	Your choice, {model}, is not working: {problem}	Tu elección, {model}, no funciona: {problem}
+	Nothing PhotoCraft can run does this tool yet. Add an online service below.	Todavía no hay nada que PhotoCraft pueda ejecutar para esta herramienta. Añade un servicio en línea abajo.
+	Other options (not available in PhotoCraft yet)	Otras opciones (todavía no disponibles en PhotoCraft)
+	PhotoCraft does not include what this option needs.	PhotoCraft no incluye lo que necesita esta opción.
+	Recommended	Recomendado
+	Stays on this computer	Se queda en este equipo
+	Sent to the service	Se envía al servicio
+	Download {size}	Descarga de {size}
+	Set up	Configurar
+	Add key	Añadir clave
+	Switch on	Activar
+	in use	en uso
+	Set up {model}	Configurar {model}
+	The model is shared with every Craft app that has this tool.	El modelo se comparte con todas las apps Craft que tienen esta herramienta.
+	The files are checked and ready.	Los archivos están comprobados y listos.
+	Use this model	Usar este modelo
+	Model files are saved to:	Los archivos del modelo se guardan en:
+	Choose where model files are saved before downloading.	Elige dónde guardar los archivos del modelo antes de descargar.
+	Suggested folder: {folder}	Carpeta sugerida: {folder}
+	Use the suggested folder	Usar la carpeta sugerida
+	Read the licence: {name}	Leer la licencia: {name}
+	Licence: {name}	Licencia: {name}
+	Downloading file {n} of {total}	Descargando el archivo {n} de {total}
+	Checking file {n} of {total}	Comprobando el archivo {n} de {total}
+	Working on the model files…	Trabajando en los archivos del modelo…
+	These files did not pass their check. Choose a new, empty folder for the download; the old files are left alone.	Estos archivos no pasaron la comprobación. Elige una carpeta nueva y vacía para la descarga; los archivos anteriores no se tocan.
+	PhotoCraft can't use this option yet. Choose another.	PhotoCraft todavía no puede usar esta opción. Elige otra.
+	Model files already on this computer:	Archivos del modelo que ya están en este equipo:
+	I accept the model's licences	Acepto las licencias del modelo
+	Check the files	Comprobar los archivos
+	Download the model	Descargar el modelo
+	Find model files…	Buscar archivos del modelo…
+	Change folder…	Cambiar carpeta…
+	Access to these model files was refused.	Se denegó el acceso a estos archivos del modelo.
+	Setup was cancelled. A partial download carries on next time.	Se canceló la configuración. Una descarga parcial continúa la próxima vez.
+	The download could not finish. Check your connection and try again.	La descarga no pudo terminar. Revisa tu conexión e inténtalo de nuevo.
+	The model files could not be checked. Look at the files and the folder.	No se pudieron comprobar los archivos del modelo. Revisa los archivos y la carpeta.
+	The model files could not be prepared. Nothing was switched on; you can try again.	No se pudieron preparar los archivos del modelo. No se activó nada; puedes intentarlo de nuevo.
+	This option runs through ComfyUI, which the Craft apps cannot set up yet. Choose a built-in option instead.	Esta opción funciona con ComfyUI, que las apps Craft todavía no pueden configurar. Elige una opción integrada.
+	SAM 2.1, built in (the processor, on any system)	SAM 2.1, integrado (en el procesador, en cualquier sistema)
+	SAM 2.1, built in (any graphics card, set up once on this computer)	SAM 2.1, integrado (cualquier tarjeta gráfica, se prepara una vez en este equipo)
+	SAM 3, built in (Apple graphics, otherwise the processor)	SAM 3, integrado (gráficos de Apple o, si no, el procesador)
+	Not installed.	No instalado.
+	Runs on this computer.	Se ejecuta en este equipo.
+	The model files are missing.	Faltan los archivos del modelo.
+	Set it up again.	Configúralo de nuevo.
+	This app can't use this option yet.	Esta app todavía no puede usar esta opción.
+	Selects by clicking on the picture, not by a description.	Selecciona con clics en la imagen, no con una descripción.
+	Runs on this computer, free.	Se ejecuta en este equipo, gratis.
+	Sent to the service, billed per use.	Se envía al servicio, se cobra por uso.
+	Sent to the service, free.	Se envía al servicio, gratis.
+	Sent to the service.	Se envía al servicio.
+	Selecting the object with {model}… (Esc cancels)	Seleccionando el objeto con {model}… (Esc cancela)
+	Object Selection with {model} sends the picture to {destination}.	Selección de objetos con {model} envía la imagen a {destination}.
+	Object Selection cancelled	Selección de objetos cancelada
+	No object found there — try a tighter rectangle	No se encontró ningún objeto ahí; prueba con un rectángulo más ajustado
+	Object selected with {model}	Objeto seleccionado con {model}
+	The document changed. Please select the object again.	El documento cambió. Vuelve a seleccionar el objeto.
+	Generative Fill…	Relleno generativo…
+	Generative Fill	Relleno generativo
+	Generating with {model}… (Esc cancels)	Generando con {model}… (Esc cancela)
+	Generative Fill with {model} sends the picture, the selection and your description to {destination}.	Relleno generativo con {model} envía la imagen, la selección y tu descripción a {destination}.
+	Generative Fill cancelled	Relleno generativo cancelado
+	The AI model returned no picture. Try another description.	El modelo de IA no devolvió ninguna imagen. Prueba con otra descripción.
+	Generated with {model}	Generado con {model}
+	The document changed. Please choose Generative Fill again.	El documento cambió. Vuelve a elegir Relleno generativo.
+	Generative Fill needs an AI image model	Relleno generativo necesita un modelo de IA de imágenes
+	Describe what should appear in the selection. {model} paints it as a new layer.	Describe lo que debe aparecer en la selección. {model} lo pinta en una capa nueva.
+	{reason} Choose one under AI models.	{reason} Elige uno en Modelos de IA.
+	For example: a red umbrella	Por ejemplo: un paraguas rojo
+	Leave it empty to fill the selection to match its surroundings.	Déjalo vacío para rellenar la selección según lo que la rodea.

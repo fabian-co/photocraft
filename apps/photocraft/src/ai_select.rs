@@ -1,5 +1,5 @@
-//! Select Subject on the AI model the person chose for the Craft apps, through the shared Craft
-//! AI layer (`storytold/craft-ai-integrations`).
+//! Select Subject, Object Selection and Generative Fill on the AI models the person chose for the
+//! Craft apps, through the shared Craft AI layer (`storytold/craft-ai-integrations`).
 //!
 //! The choice of model, the connections and the keys are shared with the other Craft apps (the
 //! launcher's Set up AI window writes them). This app ships the built-in engines that run a
@@ -15,7 +15,9 @@ use std::time::Duration;
 use craft_ai_client::{AiClient, Plan, RoleStatus};
 use craft_ai_core::segment::{self, Area, Click};
 use craft_ai_core::{AppId, ConsentLedger, ConsentTerm, ErrorKind, Event, InputRole, JobState, Payload, PayloadKind, Request, Role};
-use photocraft_ui_egui::ai_select::{AiConsentAsk, AiConsentTerm, AiJobPoll, AiSelect, AiSelectJob, AiSelectRequest, AiSelectStart, AiSelectStatus};
+use photocraft_ui_egui::ai_select::{
+    AiConsentAsk, AiConsentTerm, AiFillRequest, AiJobPoll, AiSelect, AiSelectJob, AiSelectRequest, AiSelectStart, AiSelectStatus,
+};
 
 mod settings;
 
@@ -23,15 +25,19 @@ mod settings;
 const APP_ID: &str = "photocraft";
 /// The suite's Select Subject tool in the shared catalogue.
 const FEATURE: &str = "select-subject";
+/// The suite's Generative Fill tool in the shared catalogue.
+const FILL_FEATURE: &str = "generative-fill";
 /// How often the worker asks the model how it is doing.
 const POLL_EVERY: Duration = Duration::from_millis(100);
 
 /// The service, or `None` when the shared AI folder cannot be read (the app works without it).
 pub fn service() -> Option<Box<dyn AiSelect>> {
-    let role = craft_ai_features::builtin().into_iter().find(|f| f.id == FEATURE).and_then(|f| f.role())?;
+    let role_of = |id: &str| craft_ai_features::builtin().into_iter().find(|f| f.id == id).and_then(|f| f.role());
+    let role = role_of(FEATURE)?;
+    let fill_role = role_of(FILL_FEATURE);
     let app = AppId::new(APP_ID).ok()?;
     match AiClient::standard(app.clone()) {
-        Ok(client) => Some(Box::new(CraftAiSelect { client: Arc::new(client), app, role, settings: settings::Settings::default() })),
+        Ok(client) => Some(Box::new(CraftAiSelect { client: Arc::new(client), app, role, fill_role, settings: settings::Settings::default() })),
         Err(error) => {
             log::warn!("AI Select Subject is off: {error}");
             None
@@ -43,6 +49,8 @@ struct CraftAiSelect {
     client: Arc<AiClient>,
     app: AppId,
     role: Role,
+    /// Generative Fill, when the catalogue has it.
+    fill_role: Option<Role>,
     /// Edit › Preferences › Integrations › AI models.
     settings: settings::Settings,
 }
@@ -57,6 +65,50 @@ impl AiSelect for CraftAiSelect {
 
     fn start(&self, request: AiSelectRequest, consent: Option<AiConsentTerm>) -> Result<AiSelectStart, String> {
         let plan = self.client.plan(&self.role, self.request(request)?).map_err(|e| e.message)?;
+        self.launch(plan, consent, Wants::Mask)
+    }
+
+    fn fill_status(&self) -> AiSelectStatus {
+        let Some(role) = &self.fill_role else {
+            return AiSelectStatus::Unavailable { reason: "This version of PhotoCraft has no Generative Fill tool.".into() };
+        };
+        match self.client.status(role) {
+            RoleStatus::Ready(ready) => AiSelectStatus::Ready { model: ready.model_label },
+            RoleStatus::Unavailable { reason } => AiSelectStatus::Unavailable { reason },
+        }
+    }
+
+    fn start_fill(&self, r: AiFillRequest, consent: Option<AiConsentTerm>) -> Result<AiSelectStart, String> {
+        let role = self.fill_role.as_ref().ok_or("This version of PhotoCraft has no Generative Fill tool.")?;
+        let picture = Payload::inline("image/png", r.png).map_err(|e| e.message)?;
+        let mask = Payload::inline("image/png", r.mask).map_err(|e| e.message)?;
+        let request = Request::new(role.capability.clone())
+            .with_input(InputRole::Source, picture)
+            .with_input(InputRole::Mask, mask)
+            .with_input(InputRole::Prompt, Payload::text(r.prompt));
+        let plan = self.client.plan(role, request).map_err(|e| e.message)?;
+        self.launch(plan, consent, Wants::Picture)
+    }
+
+    fn preferences_ui(&mut self, ui: &mut egui::Ui) {
+        let mut tools = vec![(self.role.clone(), "Select Subject")];
+        if let Some(fill) = &self.fill_role {
+            tools.push((fill.clone(), "Generative Fill"));
+        }
+        self.settings.ui(ui, &self.app, &self.client, &tools);
+    }
+}
+
+/// What the job hands back: a selection mask, or a picture.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Wants {
+    Mask,
+    Picture,
+}
+
+impl CraftAiSelect {
+    /// Asks first when the plan sends anything off this computer, then starts the job on a worker.
+    fn launch(&self, plan: Plan, consent: Option<AiConsentTerm>, wants: Wants) -> Result<AiSelectStart, String> {
         let file = self.client.consent_file();
         let mut saved = file.as_ref().map(|f| f.load_or_empty()).unwrap_or_default();
         let ledger = if plan.needs_consent(&saved) {
@@ -74,17 +126,11 @@ impl AiSelect for CraftAiSelect {
         } else {
             saved
         };
-        Ok(AiSelectStart::Started(Box::new(Worker::spawn(self.client.clone(), plan, ledger))))
+        Ok(AiSelectStart::Started(Box::new(Worker::spawn(self.client.clone(), plan, ledger, wants))))
     }
 
-    fn preferences_ui(&mut self, ui: &mut egui::Ui) {
-        self.settings.ui(ui, &self.app, &self.client, &self.role);
-    }
-}
-
-impl CraftAiSelect {
-    /// The `image.segment` request: the picture and the hint box (or a click in the middle when
-    /// there is no hint), as the shared contract spells them. No words: every built-in route reads
+    /// The `image.segment` request: the picture and the box, or the click (the middle of the
+    /// picture when there is neither), as the shared contract spells them. No words: every built-in route reads
     /// a box or clicks, and the ones that select only by clicking (SAM 2.1) refuse a description,
     /// so `r.prompt` is not sent.
     fn request(&self, r: AiSelectRequest) -> Result<Request, String> {
@@ -92,7 +138,10 @@ impl CraftAiSelect {
         let request = Request::new(self.role.capability.clone()).with_input(InputRole::Source, picture);
         Ok(match r.area {
             Some([x0, y0, x1, y1]) => segment::with_area(request, Area { x0, y0, x1, y1 }),
-            None => segment::with_clicks(request, &[Click { x: 0.5, y: 0.5, positive: true }]),
+            None => {
+                let [x, y] = r.click.unwrap_or([0.5, 0.5]);
+                segment::with_clicks(request, &[Click { x, y, positive: true }])
+            }
         })
     }
 }
@@ -152,14 +201,14 @@ struct Worker {
 }
 
 impl Worker {
-    fn spawn(client: Arc<AiClient>, plan: Plan, ledger: ConsentLedger) -> Self {
+    fn spawn(client: Arc<AiClient>, plan: Plan, ledger: ConsentLedger, wants: Wants) -> Self {
         let (tx, updates) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let stop = cancel.clone();
         std::thread::Builder::new()
             .name("ai-select-subject".into())
             .spawn(move || {
-                let end = run(&client, &plan, &ledger, &stop, |poll| {
+                let end = run(&client, &plan, &ledger, &stop, wants, |poll| {
                     let _ = tx.send(poll);
                 });
                 let _ = tx.send(end);
@@ -171,7 +220,7 @@ impl Worker {
     }
 }
 
-fn run(client: &AiClient, plan: &Plan, ledger: &ConsentLedger, stop: &AtomicBool, report: impl Fn(AiJobPoll)) -> AiJobPoll {
+fn run(client: &AiClient, plan: &Plan, ledger: &ConsentLedger, stop: &AtomicBool, wants: Wants, report: impl Fn(AiJobPoll)) -> AiJobPoll {
     let failed = |e: craft_ai_core::AiError| if e.kind == ErrorKind::Cancelled { AiJobPoll::Cancelled } else { AiJobPoll::Failed(e.message) };
     // The worker owns the plan (and the picture in it) until the job has ended.
     let job = match client.start(plan, ledger) {
@@ -199,11 +248,22 @@ fn run(client: &AiClient, plan: &Plan, ledger: &ConsentLedger, stop: &AtomicBool
             JobState::Cancelled => return AiJobPoll::Cancelled,
             JobState::Failed { error } => return failed(error),
             JobState::Succeeded if cancel_sent => return AiJobPoll::Cancelled,
+            JobState::Succeeded if wants == Wants::Picture => {
+                // The first picture the model returned.
+                let picture = outputs.iter().find_map(|o| match &o.payload {
+                    Payload::Inline { data, media_type } if media_type.kind() == PayloadKind::Image => Some(data.clone()),
+                    _ => None,
+                });
+                return match picture {
+                    Some(png) => AiJobPoll::Done { png, matched: true, name: None },
+                    None => AiJobPoll::Failed("The AI model returned no picture. Try another description, or another model.".into()),
+                };
+            }
             JobState::Succeeded => {
                 let found = segment::read_found(&outputs);
                 return match segment::mask(&outputs) {
                     Some(Payload::Inline { data, .. }) => {
-                        AiJobPoll::Done { mask_png: data.clone(), matched: found.as_ref().is_none_or(|f| f.matched), name: found.and_then(|f| f.name) }
+                        AiJobPoll::Done { png: data.clone(), matched: found.as_ref().is_none_or(|f| f.matched), name: found.and_then(|f| f.name) }
                     }
                     _ => AiJobPoll::Failed("The AI model returned no selection. Try again, or choose another model in Set up AI.".into()),
                 };

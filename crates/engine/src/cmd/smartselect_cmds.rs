@@ -341,7 +341,8 @@ const AI_SOURCE_MAX_SIDE: u32 = 2048;
 
 /// The picture an AI selection model reads, as an RGBA PNG at most `maxSide` pixels on its
 /// longest side, plus a hint where the subject is: the built-in Select Subject's bounds as a
-/// fraction of the picture, when it finds one.
+/// fraction of the picture, when it finds one (`"hint": false` skips it). `canvas` is
+/// `[x, y, width, height]` of the canvas the picture covers.
 fn ai_source(s: &mut Session, p: &Value) -> Result<Value> {
     use base64::Engine as _;
     const CMD: &str = "select.aiSource";
@@ -389,6 +390,8 @@ fn ai_source(s: &mut Session, p: &Value) -> Result<Value> {
         "height": h,
         "document": d.doc.id.0,
         "box": hint,
+        // The canvas the picture covers, so a caller can turn canvas pixels into fractions.
+        "canvas": [bounds.x0, bounds.y0, sw, sh],
     }))
 }
 

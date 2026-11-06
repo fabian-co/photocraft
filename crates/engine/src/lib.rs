@@ -65,6 +65,7 @@ pub use cmd as commands;
 pub use cmd::actions_cmds;
 pub use cmd::actions_edit_cmds;
 pub use cmd::adjust_cmds;
+pub use cmd::ai_fill_cmds;
 pub use cmd::align_cmds;
 pub use cmd::analysis_cmds;
 pub use cmd::artboard_cmds;
