@@ -48,6 +48,9 @@ rfd = { workspace = true }
 craft-ai-client = { workspace = true, features = ["rten"] }
 craft-ai-core = { workspace = true }
 craft-ai-features = { workspace = true }
+# The shared model picker and model download screen (Edit › Preferences › Integrations).
+craft-ai-egui = { workspace = true }
+craft-ai-native = { workspace = true }
 arboard = { version = "3.7", features = ["wayland-data-control"] }
 open = "5"
 # Reads the saved window layout (eframe persistence) to drop values that would abort startup.

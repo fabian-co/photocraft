@@ -17,6 +17,8 @@ use craft_ai_core::segment::{self, Area, Click};
 use craft_ai_core::{AppId, ConsentLedger, ConsentTerm, ErrorKind, Event, InputRole, JobState, Payload, PayloadKind, Request, Role};
 use photocraft_ui_egui::ai_select::{AiConsentAsk, AiConsentTerm, AiJobPoll, AiSelect, AiSelectJob, AiSelectRequest, AiSelectStart, AiSelectStatus};
 
+mod settings;
+
 /// This app's id in the shared store: it scopes consent and a per-app choice of model.
 const APP_ID: &str = "photocraft";
 /// The suite's Select Subject tool in the shared catalogue.
@@ -28,8 +30,8 @@ const POLL_EVERY: Duration = Duration::from_millis(100);
 pub fn service() -> Option<Box<dyn AiSelect>> {
     let role = craft_ai_features::builtin().into_iter().find(|f| f.id == FEATURE).and_then(|f| f.role())?;
     let app = AppId::new(APP_ID).ok()?;
-    match AiClient::standard(app) {
-        Ok(client) => Some(Box::new(CraftAiSelect { client: Arc::new(client), role })),
+    match AiClient::standard(app.clone()) {
+        Ok(client) => Some(Box::new(CraftAiSelect { client: Arc::new(client), app, role, settings: settings::Settings::default() })),
         Err(error) => {
             log::warn!("AI Select Subject is off: {error}");
             None
@@ -39,7 +41,10 @@ pub fn service() -> Option<Box<dyn AiSelect>> {
 
 struct CraftAiSelect {
     client: Arc<AiClient>,
+    app: AppId,
     role: Role,
+    /// Edit › Preferences › Integrations › AI models.
+    settings: settings::Settings,
 }
 
 impl AiSelect for CraftAiSelect {
@@ -70,6 +75,10 @@ impl AiSelect for CraftAiSelect {
             saved
         };
         Ok(AiSelectStart::Started(Box::new(Worker::spawn(self.client.clone(), plan, ledger))))
+    }
+
+    fn preferences_ui(&mut self, ui: &mut egui::Ui) {
+        self.settings.ui(ui, &self.app, &self.client, &self.role);
     }
 }
 

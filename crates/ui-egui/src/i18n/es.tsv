@@ -4448,3 +4448,5 @@ smartSvg	AI/PDF/EPS contents will be edited as SVG. Saving replaces the embedded
 	Select Subject cancelled	Seleccionar sujeto cancelado
 	Selected {name} with {model}	{name} seleccionado con {model}
 	Subject selected with {model}	Sujeto seleccionado con {model}
+	AI models	Modelos de IA
+	Select › Subject uses the model chosen here. The choice is shared with the other Craft apps and applies at once.	Selección › Sujeto usa el modelo elegido aquí. La elección se comparte con las demás apps Craft y se aplica al instante.

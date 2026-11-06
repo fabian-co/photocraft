@@ -1595,6 +1595,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-ai-egui"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-ai-integrations?rev=544809e5802516a842a536922decdb1bf8b5230c#544809e5802516a842a536922decdb1bf8b5230c"
+dependencies = [
+ "craft-ai-client",
+ "craft-ai-core",
+ "craft-ai-features",
+ "craft-ai-native",
+ "egui",
+]
+
+[[package]]
 name = "craft-ai-engine"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-ai-integrations?rev=544809e5802516a842a536922decdb1bf8b5230c#544809e5802516a842a536922decdb1bf8b5230c"
@@ -2081,7 +2093,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5555,7 +5567,9 @@ dependencies = [
  "core-graphics2",
  "craft-ai-client",
  "craft-ai-core",
+ "craft-ai-egui",
  "craft-ai-features",
+ "craft-ai-native",
  "craft-update",
  "dispatch2",
  "eframe",

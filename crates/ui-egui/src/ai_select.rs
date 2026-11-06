@@ -115,6 +115,24 @@ pub trait AiSelect {
     fn status(&self) -> AiSelectStatus;
     /// Plans the job and, when no consent is needed or `consent` gives it, starts it.
     fn start(&self, request: AiSelectRequest, consent: Option<AiConsentTerm>) -> Result<AiSelectStart, String>;
+    /// Draws the service's part of Edit › Preferences › Integrations: which model Select Subject
+    /// uses and, for a model that runs on this computer, getting its files. Choices are shared
+    /// with the other Craft apps and apply at once, not on OK. Nothing is drawn by default.
+    fn preferences_ui(&mut self, _ui: &mut egui::Ui) {}
+}
+
+/// The AI block under Edit › Preferences › Integrations, when the app has an AI service.
+pub(crate) fn preferences_section(ui: &mut egui::Ui, service: &mut (dyn AiSelect + 'static)) {
+    ui.add_space(10.0);
+    ui.separator();
+    ui.label(egui::RichText::new(tl!("AI models")).strong());
+    ui.label(
+        egui::RichText::new(tl!("Select › Subject uses the model chosen here. The choice is shared with the other Craft apps and applies at once."))
+            .small()
+            .weak(),
+    );
+    ui.add_space(6.0);
+    service.preferences_ui(ui);
 }
 
 /// A running job, or a request waiting for the consent prompt.

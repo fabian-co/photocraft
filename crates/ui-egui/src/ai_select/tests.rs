@@ -12,6 +12,8 @@ struct Script {
     running_polls: usize,
     matched: bool,
     cancelled: bool,
+    /// Frames Preferences drew the service's settings in.
+    settings_drawn: usize,
 }
 
 struct FakeService(Rc<RefCell<Script>>);
@@ -32,6 +34,10 @@ impl AiSelect for FakeService {
             return Ok(AiSelectStart::NeedsConsent(AiConsentAsk { destination: "https://example.test".into(), items: vec!["Picture, 1 KB".into()] }));
         }
         Ok(AiSelectStart::Started(Box::new(FakeJob(self.0.clone(), 0))))
+    }
+    fn preferences_ui(&mut self, ui: &mut egui::Ui) {
+        self.0.borrow_mut().settings_drawn += 1;
+        ui.label("Fake model picker");
     }
 }
 
@@ -149,4 +155,34 @@ fn automation_keeps_the_built_in_command() {
     let (mut app, script) = make_app(Script { ready: true, matched: true, ..Default::default() });
     app.run("select.subject", json!({"builtIn": true})).unwrap();
     assert!(script.borrow().starts.is_empty());
+}
+
+#[test]
+fn preferences_integrations_shows_the_services_model_settings() {
+    let (mut app, script) = make_app(Script::default());
+    crate::prefs_ui::open_preferences(&mut app, "integrations");
+    let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("semibold".into()))) {
+                crate::dialogs::show(app, ui.ctx());
+            }
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, Default::default());
+    h.run_steps(3);
+    assert!(script.borrow().settings_drawn > 0);
+    use egui_kittest::kittest::Queryable as _;
+    h.get_by_label("Fake model picker");
+    h.get_by_label("AI models");
+
+    // Other sections leave it out.
+    let general = {
+        let app = h.state_mut();
+        let id = app.ui.dialogs.last().map(|d| d.id).unwrap();
+        app.ui.dialog_mut(id).unwrap().fields.insert("section".into(), json!("general"));
+        script.borrow().settings_drawn
+    };
+    h.run_steps(3);
+    assert_eq!(script.borrow().settings_drawn, general);
 }
