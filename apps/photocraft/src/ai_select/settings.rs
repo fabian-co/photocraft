@@ -61,6 +61,11 @@ pub(crate) struct Settings {
     panel: Option<ConnectionPanel>,
     /// The answer to the last thing the person did, and whether it is a problem.
     note: Option<(String, bool)>,
+    /// Saved online services whose models are not known yet (saved without a test): the picker
+    /// leaves them out, so they are listed here with a button to ask the service.
+    unlisted: Vec<(ConnectionId, String)>,
+    /// A service being asked for its models.
+    asking: Option<Receiver<Result<usize, String>>>,
 }
 
 impl Settings {
@@ -72,6 +77,9 @@ impl Settings {
             self.read_at = None;
         }
         self.drawn_at = Some(Instant::now());
+        // Keep drawing while Preferences is open, so a pause in input is not taken for closing.
+        ui.ctx().request_repaint_after(CLOSED_AFTER / 2);
+        self.poll_asking();
         if self.panel.is_some() {
             self.panel_ui(ui);
         } else if self.setup.is_some() {
@@ -130,6 +138,25 @@ impl Settings {
             }
             None => None,
         };
+        let mut ask = None;
+        for (id, label) in &self.unlisted {
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(fill(t("{service} is saved, but its models are not known yet."), &[("service", label)]));
+                let busy = self.asking.is_some();
+                if ui.add_enabled(!busy, egui::Button::new(t("Find its models"))).clicked() {
+                    ask = Some((id.clone(), true));
+                }
+                if ui.button(t("Change the key")).clicked() {
+                    ask = Some((id.clone(), false));
+                }
+            });
+        }
+        match ask {
+            Some((id, true)) => self.ask_models(id),
+            Some((id, false)) => self.open_fix(&id),
+            None => {}
+        }
         ui.add_space(8.0);
         if ui.button(t("Add an online service (OpenAI, Gemini…)")).clicked() {
             self.open_panel(ConnectionFormState::new());
@@ -151,7 +178,41 @@ impl Settings {
     fn refresh(&mut self, client: &AiClient, role: &Role) {
         let options = craft_ai_features::setup_options(&craft_ai_features::builtin());
         self.view = Some(client.picker(role, &options).map_err(|e| e.message));
+        self.unlisted = shared()
+            .and_then(|s| s.load().map_err(|e| e.to_string()))
+            .map(|store| {
+                store.connections.into_iter().filter(|c| c.locality == Locality::Remote && c.enabled && c.models.is_empty()).map(|c| (c.id, c.label)).collect()
+            })
+            .unwrap_or_default();
         self.read_at = Some(Instant::now());
+    }
+
+    /// Asks a saved service which models it has, in the background, and keeps the answer in the
+    /// shared settings, so its models show up in the list.
+    fn ask_models(&mut self, id: ConnectionId) {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let answer = ConnectionManager::standard().and_then(|m| m.test_saved(&id, true)).map(|r| r.models.len()).map_err(|e| e.message);
+            let _ = tx.send(answer);
+        });
+        self.asking = Some(rx);
+        self.note = Some((t("Asking the service which models it has…").to_owned(), false));
+    }
+
+    fn poll_asking(&mut self) {
+        let Some(rx) = &self.asking else { return };
+        let answer = match rx.try_recv() {
+            Ok(answer) => answer,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err(t("The service could not be asked.").to_owned()),
+        };
+        self.asking = None;
+        self.read_at = None;
+        self.note = Some(match answer {
+            Ok(0) => (t("The service answered, but it has no models PhotoCraft knows.").to_owned(), true),
+            Ok(_) => (t("Service saved. Its models are in the list now: click one to use it.").to_owned(), false),
+            Err(problem) => (fill(t("The service did not answer: {problem}. Check the key and try again."), &[("problem", &problem)]), true),
+        });
     }
 
     /// `native:<tool>:<engine>` downloads here, `service:<preset>` opens the service form; a
@@ -207,10 +268,18 @@ impl Settings {
         );
         ui.add_space(4.0);
         match panel.show(ui) {
-            Some(PanelEvent::Saved(_)) => {
+            Some(PanelEvent::Saved(id)) => {
                 self.panel = None;
                 self.read_at = None;
-                self.note = Some((t("Service saved. Its models are in the list now.").to_owned(), false));
+                // Save keeps only the models a Test found; ask the service now if there are none.
+                let known = shared()
+                    .and_then(|s| s.load().map_err(|e| e.to_string()))
+                    .is_ok_and(|store| store.connections.iter().any(|c| c.id == id && !c.models.is_empty()));
+                if known {
+                    self.note = Some((t("Service saved. Its models are in the list now: click one to use it.").to_owned(), false));
+                } else {
+                    self.ask_models(id);
+                }
             }
             Some(PanelEvent::Closed) => {
                 self.panel = None;

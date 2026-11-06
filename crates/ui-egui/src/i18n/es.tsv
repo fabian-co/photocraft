@@ -4535,3 +4535,11 @@ smartSvg	AI/PDF/EPS contents will be edited as SVG. Saving replaces the embedded
 	{reason} Choose one under AI models.	{reason} Elige uno en Modelos de IA.
 	For example: a red umbrella	Por ejemplo: un paraguas rojo
 	Leave it empty to fill the selection to match its surroundings.	Déjalo vacío para rellenar la selección según lo que la rodea.
+	Service saved. Its models are in the list now: click one to use it.	Servicio guardado. Sus modelos ya están en la lista: haz clic en uno para usarlo.
+	{service} is saved, but its models are not known yet.	{service} está guardado, pero aún no se conocen sus modelos.
+	Find its models	Buscar sus modelos
+	Asking the service which models it has…	Preguntando al servicio qué modelos tiene…
+	The service could not be asked.	No se pudo consultar el servicio.
+	The service answered, but it has no models PhotoCraft knows.	El servicio respondió, pero no tiene modelos que PhotoCraft conozca.
+	The service did not answer: {problem}. Check the key and try again.	El servicio no respondió: {problem}. Revisa la clave e inténtalo de nuevo.
+	Change the key	Cambiar la clave
