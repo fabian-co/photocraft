@@ -44,6 +44,10 @@ tempfile = "=3.27.0"
 roxmltree = "0.21"
 craft-update = { workspace = true }
 rfd = { workspace = true }
+# AI Select Subject through the shared Craft AI layer; `rten` runs SAM 2.1 on this computer.
+craft-ai-client = { workspace = true, features = ["rten"] }
+craft-ai-core = { workspace = true }
+craft-ai-features = { workspace = true }
 arboard = { version = "3.7", features = ["wayland-data-control"] }
 open = "5"
 # Reads the saved window layout (eframe persistence) to drop values that would abort startup.

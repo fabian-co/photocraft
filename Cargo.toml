@@ -45,6 +45,11 @@ craft-jpeg = { git = "https://github.com/storytold/craft-libs", rev = "c5a1cbfb5
 craft-pcraft-format = { git = "https://github.com/storytold/craft-libs", rev = "b8f7d93b00dfb8f172938f3d2d796ae62dcfe123" }
 # craft-update: app-specific pretend versions apply to startup and manual checks.
 craft-update = { git = "https://github.com/storytold/craft-libs", version = "=0.1.0", rev = "c5a1cbfb5f9049f9270955caffb5bee5997aebf7", features = ["egui"] }
+# The shared Craft AI layer (AI Select Subject, apps/photocraft/src/ai_select.rs). One revision for
+# every crate, and its own craft-ai-core, never the craft-libs copy (docs/adopting there).
+craft-ai-client = { git = "https://github.com/storytold/craft-ai-integrations", rev = "544809e5802516a842a536922decdb1bf8b5230c" }
+craft-ai-core = { git = "https://github.com/storytold/craft-ai-integrations", rev = "544809e5802516a842a536922decdb1bf8b5230c" }
+craft-ai-features = { git = "https://github.com/storytold/craft-ai-integrations", rev = "544809e5802516a842a536922decdb1bf8b5230c" }
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"

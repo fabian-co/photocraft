@@ -4432,3 +4432,19 @@ smartSvg	AI/PDF/EPS contents will be edited as SVG. Saving replaces the embedded
 	Stop Color	Color de la parada
 	Shapes can't use patterns yet	Las formas aún no pueden usar motivos
 	Edit Brush…	Editar pincel…
+	Just this time	Solo esta vez
+	For one hour	Durante una hora
+	For one day	Durante un día
+	Until I turn it off	Hasta que lo desactive
+	Allow it:	Permitirlo:
+	Send	Enviar
+	The picture could not be prepared for the AI model	No se pudo preparar la imagen para el modelo de IA
+	AI selection is not available	La selección con IA no está disponible
+	Selecting the subject with {model}… (Esc cancels)	Seleccionando el sujeto con {model}… (Esc cancela)
+	The AI model still needs your agreement. Please try again.	El modelo de IA todavía necesita su permiso. Inténtelo de nuevo.
+	Select Subject with {model} sends the picture to {destination}.	Seleccionar sujeto con {model} envía la imagen a {destination}.
+	Nothing is waiting to be sent	No hay nada pendiente de enviar
+	The document changed. Please choose Select Subject again.	El documento cambió. Vuelva a elegir Seleccionar sujeto.
+	Select Subject cancelled	Seleccionar sujeto cancelado
+	Selected {name} with {model}	{name} seleccionado con {model}
+	Subject selected with {model}	Sujeto seleccionado con {model}

@@ -700,3 +700,50 @@ fn refine_edge_rejects_bad_edits_and_keeps_the_selection() {
         assert_eq!(sel_bytes(&s, 80, 40), before, "{bad}");
     }
 }
+
+/// The AI selection source: a PNG no larger than `maxSide`, with the built-in subject's bounds
+/// as a hint, and not recorded in actions.
+#[test]
+fn ai_source_is_a_scaled_png_with_a_subject_hint() {
+    use base64::Engine as _;
+    let (mut s, _) = disc(8);
+    let v = s.execute("select.aiSource", json!({"maxSide": 100})).unwrap();
+    let (w, h) = (v["width"].as_u64().unwrap(), v["height"].as_u64().unwrap());
+    assert_eq!((w, h), (100, 80));
+    let png = base64::engine::general_purpose::STANDARD.decode(v["png"].as_str().unwrap()).unwrap();
+    let image = photocraft_codecs::decode(&png).unwrap();
+    assert_eq!((image.width(), image.height()), (100, 80));
+    let hint: Vec<f64> = v["box"].as_array().unwrap().iter().map(|n| n.as_f64().unwrap()).collect();
+    assert!(hint[0] < 0.5 && hint[2] > 0.5 && hint[1] < 0.5 && hint[3] > 0.5, "{hint:?}");
+    assert!(s.active().unwrap().doc.selection.is_none());
+}
+
+/// A mask smaller than the canvas is stretched over it and becomes one undoable selection;
+/// an empty mask leaves the selection alone.
+#[test]
+fn from_mask_stretches_the_mask_over_the_canvas() {
+    use base64::Engine as _;
+    let (mut s, inside) = disc(8);
+    let src = s.execute("select.aiSource", json!({"maxSide": 100, "hint": false})).unwrap();
+    // The disc, drawn as a mask at the source size from the full-size truth.
+    let (w, h) = (100u32, 80u32);
+    let mut image = photocraft_codecs::Image::new(w, h, photocraft_codecs::ChannelLayout::Gray, photocraft_codecs::SampleType::U8).unwrap();
+    for y in 0..h {
+        for x in 0..w {
+            image.data_mut()[(y * w + x) as usize] = if inside(x as i32 * 2, y as i32 * 2) { 255 } else { 0 };
+        }
+    }
+    let png = photocraft_codecs::encode(&image, photocraft_codecs::Format::Png, &Default::default()).unwrap();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&png);
+    let v = s.execute("select.fromMask", json!({"png": encoded, "document": src["document"]})).unwrap();
+    assert_eq!(v["changed"], json!(true));
+    assert!(sel_iou(&s, 200, 160, &inside) > 0.9);
+    s.execute("edit.undo", json!({})).unwrap();
+    assert!(s.active().unwrap().doc.selection.is_none());
+
+    let empty = photocraft_codecs::Image::new(4, 4, photocraft_codecs::ChannelLayout::Gray, photocraft_codecs::SampleType::U8).unwrap();
+    let png = photocraft_codecs::encode(&empty, photocraft_codecs::Format::Png, &Default::default()).unwrap();
+    let v = s.execute("select.fromMask", json!({"png": base64::engine::general_purpose::STANDARD.encode(&png)})).unwrap();
+    assert_eq!(v["changed"], json!(false));
+    assert!(s.execute("select.fromMask", json!({"png": encoded, "document": 999_999})).is_err());
+}

@@ -378,6 +378,9 @@ pub type RightButtonDownFn = Box<dyn Fn() -> bool + Send + Sync>;
 /// I/O dependencies.
 #[derive(Default)]
 pub struct Services {
+    /// Select Subject on the AI model the person chose for the Craft apps (desktop only; see
+    /// [`crate::ai_select`]). `None` keeps the built-in Select Subject.
+    pub ai_select: Option<Box<dyn crate::ai_select::AiSelect>>,
     /// Explicit interactive SVG smart-object editing; unavailable in browser and automation.
     pub open_external_svg: Option<OpenExternalSvgFn>,
     /// User-initiated desktop/browser pixel sampling.

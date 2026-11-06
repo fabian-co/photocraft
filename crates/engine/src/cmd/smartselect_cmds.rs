@@ -305,6 +305,21 @@ impl SubjectCache {
 fn select_subject(s: &mut Session, p: &Value) -> Result<Value> {
     // The selected layer's pixels; the composite only when no pixel layer is selected.
     let all_layers = b(p, "sampleAllLayers", false);
+    let region = subject_region(s, all_layers)?;
+    let out = apply(s, "Select Subject", region.as_deref(), mode(p, "replace"))?;
+    // Follow the document past the selection edit just made (same pixels), so a short history
+    // dropping the older state doesn't turn the next repeat into a miss.
+    if let Some(d) = s.active()
+        && s.subject_cache.doc_id == Some(d.doc.id)
+        && s.subject_cache.doc.upgrade().is_some_and(|old| crate::layer_multi_cmds::same_pixels(&old, &d.doc))
+    {
+        s.subject_cache.doc = std::sync::Arc::downgrade(&d.doc);
+    }
+    Ok(out)
+}
+
+/// The built-in Select Subject region of the active document (cached while its pixels stay the same).
+fn subject_region(s: &mut Session, all_layers: bool) -> Result<Option<std::sync::Arc<Region>>> {
     let d = s.active().ok_or(EngineError::NoDocument)?;
     // What `with_doc_sampler` samples: the active layer's pixels, else the composite.
     let target = d.active_layer.filter(|id| !all_layers && d.doc.layer(*id).and_then(Layer::surface).is_some());
@@ -318,16 +333,125 @@ fn select_subject(s: &mut Session, p: &Value) -> Result<Value> {
         s.subject_cache = SubjectCache { doc: std::sync::Arc::downgrade(&doc), doc_id: Some(doc.id), target, region: region.clone() };
         region
     };
-    let out = apply(s, "Select Subject", region.as_deref(), mode(p, "replace"))?;
-    // Follow the document past the selection edit just made (same pixels), so a short history
-    // dropping the older state doesn't turn the next repeat into a miss.
-    if let Some(d) = s.active()
-        && s.subject_cache.doc_id == Some(d.doc.id)
-        && s.subject_cache.doc.upgrade().is_some_and(|old| crate::layer_multi_cmds::same_pixels(&old, &d.doc))
-    {
-        s.subject_cache.doc = std::sync::Arc::downgrade(&d.doc);
+    Ok(region)
+}
+
+/// Longest side of the picture `select.aiSource` hands to a selection model.
+const AI_SOURCE_MAX_SIDE: u32 = 2048;
+
+/// The picture an AI selection model reads, as an RGBA PNG at most `maxSide` pixels on its
+/// longest side, plus a hint where the subject is: the built-in Select Subject's bounds as a
+/// fraction of the picture, when it finds one.
+fn ai_source(s: &mut Session, p: &Value) -> Result<Value> {
+    use base64::Engine as _;
+    const CMD: &str = "select.aiSource";
+    let all_layers = b(p, "sampleAllLayers", false);
+    let max_side = p.get("maxSide").and_then(Value::as_u64).map_or(AI_SOURCE_MAX_SIDE, |v| v.clamp(64, 8192) as u32);
+    let hint = if b(p, "hint", true) { subject_region(s, all_layers)? } else { None };
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    let bounds = d.doc.bounds();
+    let (sw, sh) = (bounds.width(), bounds.height());
+    if sw == 0 || sh == 0 {
+        return Err(bad(CMD, "the document is empty"));
     }
-    Ok(out)
+    let scale = (f64::from(max_side) / f64::from(sw.max(sh))).min(1.0);
+    let w = ((f64::from(sw) * scale).round() as u32).max(1);
+    let h = ((f64::from(sh) * scale).round() as u32).max(1);
+    let mut rgba = vec![0u8; w as usize * h as usize * 4];
+    with_doc_sampler(&d.doc, d.active_layer, all_layers, |smp, _| {
+        for y in 0..h {
+            // The source row under this row's centre, read whole, then sampled at each column's centre.
+            let sy = bounds.y0 + (((f64::from(y) + 0.5) / scale) as i32).min(sh as i32 - 1);
+            let row = smp.rgba(Rect::new(bounds.x0, sy, bounds.x1, sy + 1));
+            for x in 0..w {
+                let sx = (((f64::from(x) + 0.5) / scale) as usize).min(sw as usize - 1);
+                let px = row.get(sx).copied().unwrap_or([0.0; 4]);
+                let at = (y as usize * w as usize + x as usize) * 4;
+                for c in 0..4 {
+                    rgba[at + c] = (px[c].clamp(0.0, 1.0) * 255.0).round() as u8;
+                }
+            }
+        }
+    });
+    let mut image =
+        photocraft_codecs::Image::new(w, h, photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8).map_err(|e| bad(CMD, &e.to_string()))?;
+    image.data_mut().copy_from_slice(&rgba);
+    let png = photocraft_codecs::encode(&image, photocraft_codecs::Format::Png, &photocraft_codecs::EncodeOptions::default())
+        .map_err(|e| bad(CMD, &e.to_string()))?;
+    let hint = hint.map(|r| {
+        let fx = |v: i32| (f64::from(v - bounds.x0) / f64::from(sw)).clamp(0.0, 1.0);
+        let fy = |v: i32| (f64::from(v - bounds.y0) / f64::from(sh)).clamp(0.0, 1.0);
+        json!([fx(r.bbox.x0), fy(r.bbox.y0), fx(r.bbox.x1), fy(r.bbox.y1)])
+    });
+    Ok(json!({
+        "png": base64::engine::general_purpose::STANDARD.encode(png),
+        "width": w,
+        "height": h,
+        "document": d.doc.id.0,
+        "box": hint,
+    }))
+}
+
+/// Makes a selection from a grayscale mask (white selected), as an AI selection model returns
+/// it: a PNG of any size, stretched over the whole canvas.
+fn from_mask(s: &mut Session, p: &Value) -> Result<Value> {
+    use base64::Engine as _;
+    const CMD: &str = "select.fromMask";
+    let encoded = p.get("png").and_then(Value::as_str).ok_or_else(|| bad(CMD, "png (base64) is required"))?;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).map_err(|_| bad(CMD, "png is not valid base64"))?;
+    let image = photocraft_codecs::decode(&bytes).map_err(|e| bad(CMD, &format!("the mask could not be read: {e}")))?;
+    let (mw, mh) = (image.width() as usize, image.height() as usize);
+    if mw == 0 || mh == 0 {
+        return Err(bad(CMD, "the mask is empty"));
+    }
+    // Red is the grey level of a grayscale mask; alpha, when the mask has it, limits it.
+    let rgba = image.to_rgba8();
+    let level: Vec<u8> = rgba.as_chunks::<4>().0.iter().map(|px| ((u16::from(px[0]) * u16::from(px[3])) / 255) as u8).collect();
+    if level.len() < mw * mh {
+        return Err(bad(CMD, "the mask could not be read"));
+    }
+    let label = p.get("label").and_then(Value::as_str).unwrap_or("Select Subject").to_string();
+    let d = s.active().ok_or(EngineError::NoDocument)?;
+    if let Some(doc) = p.get("document").and_then(Value::as_u64)
+        && doc != d.doc.id.0
+    {
+        return Err(bad(CMD, "the mask was made for another document"));
+    }
+    let bounds = d.doc.bounds();
+    let (dw, dh) = (bounds.width() as usize, bounds.height() as usize);
+    // Bilinear stretch of the mask over the canvas, so a smaller mask keeps soft edges.
+    let at = |x: usize, y: usize| f64::from(level[y * mw + x]);
+    let sample = |x: usize, y: usize| -> u8 {
+        let fx = ((x as f64 + 0.5) * mw as f64 / dw as f64 - 0.5).clamp(0.0, (mw - 1) as f64);
+        let fy = ((y as f64 + 0.5) * mh as f64 / dh as f64 - 0.5).clamp(0.0, (mh - 1) as f64);
+        let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
+        let (x1, y1) = ((x0 + 1).min(mw - 1), (y0 + 1).min(mh - 1));
+        let (tx, ty) = (fx - x0 as f64, fy - y0 as f64);
+        let top = at(x0, y0) * (1.0 - tx) + at(x1, y0) * tx;
+        let bottom = at(x0, y1) * (1.0 - tx) + at(x1, y1) * tx;
+        (top * (1.0 - ty) + bottom * ty).round() as u8
+    };
+    let mut mask = vec![0u8; dw * dh];
+    let (mut bx0, mut by0, mut bx1, mut by1) = (usize::MAX, usize::MAX, 0usize, 0usize);
+    for y in 0..dh {
+        for x in 0..dw {
+            let v = sample(x, y);
+            if v != 0 {
+                mask[y * dw + x] = v;
+                (bx0, by0, bx1, by1) = (bx0.min(x), by0.min(y), bx1.max(x), by1.max(y));
+            }
+        }
+    }
+    let region = (bx0 != usize::MAX).then(|| {
+        let cw = bx1 - bx0 + 1;
+        let mut cropped = Vec::with_capacity(cw * (by1 - by0 + 1));
+        for y in by0..=by1 {
+            cropped.extend_from_slice(&mask[y * dw + bx0..y * dw + bx1 + 1]);
+        }
+        let bbox = Rect::new(bounds.x0 + bx0 as i32, bounds.y0 + by0 as i32, bounds.x0 + bx1 as i32 + 1, bounds.y0 + by1 as i32 + 1);
+        Region { bbox, mask: cropped }
+    });
+    apply(s, &label, region.as_ref(), mode(p, "replace"))
 }
 
 fn focus_area(s: &mut Session, p: &Value) -> Result<Value> {
@@ -548,6 +672,28 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             select_subject
         ),
+        // For the app's AI Select Subject: not on a menu and not recorded in actions, since the
+        // picture and the mask travel inside the parameters.
+        CommandSpec {
+            id: "select.aiSource",
+            label: "AI Selection Source",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"sampleAllLayers":bool=false,"maxSide":px=2048,"hint":bool=true} (returns png: base64 RGBA PNG, width, height, document, box: [x0,y0,x1,y1] fractions or null)"##,
+            enabled: has_doc,
+            run: ai_source,
+            journal: false,
+        },
+        CommandSpec {
+            id: "select.fromMask",
+            label: "Selection from Mask",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"png":base64 grayscale PNG (white selected, stretched over the canvas),"mode":"replace|add|subtract|intersect"="replace","document":id,"label":string="Select Subject"}"##,
+            enabled: has_doc,
+            run: from_mask,
+            journal: false,
+        },
         spec!(
             "select.refineEdge",
             "Refine Edge",

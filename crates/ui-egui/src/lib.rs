@@ -24,6 +24,7 @@ macro_rules! tl {
         $crate::i18n::t($s)
     };
 }
+pub mod ai_select;
 mod brush_mode_menu;
 pub mod canvas;
 pub mod control;
@@ -543,6 +544,8 @@ pub struct PhotocraftApp {
     /// command stage: a nested run (`file.save` → `layer.smartObjects.saveContents`,
     /// `actions.play` → its steps) is already inside the outer call's time.
     run_depth: u32,
+    /// Select Subject running on an AI model, or waiting for its consent prompt ([`ai_select`]).
+    pub(crate) ai_select: ai_select::Pending,
     /// Action playbacks paused at a step dialog, by the token in that dialog's fields
     /// ([`actions::RESUME`]): what to play next and the automation gate it paused under.
     pub(crate) paused_playbacks: actions::PausedPlaybacks,

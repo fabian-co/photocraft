@@ -293,6 +293,7 @@ fn command_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, d: &Dialog, fields: 
         _ if crate::channel_options_ui::owns_new_spot(fields) => crate::channel_options_ui::new_spot_body(ui, fields),
         _ if crate::shape_dialog::owns(fields) => crate::shape_dialog::body(app, ui, fields),
         _ if crate::delete_layer_prompt::owns(fields) => crate::delete_layer_prompt::body(ui, fields),
+        _ if crate::ai_select::owns(fields) => crate::ai_select::body(ui, fields),
         _ if crate::disk_change_prompt::owns(fields) => crate::disk_change_prompt::body(ui, fields),
         _ if crate::replace_prompt::owns(fields) => crate::replace_prompt::body(ui, fields),
         _ if crate::preset_group_prompt::owns(fields) => crate::preset_group_prompt::body(ui, fields),
@@ -527,6 +528,8 @@ fn ok_label(d: &Dialog) -> &'static str {
         tl!("Continue")
     } else if crate::delete_layer_prompt::owns(&d.fields) {
         tl!("Delete")
+    } else if crate::ai_select::owns(&d.fields) {
+        tl!("Send")
     } else if crate::disk_change_prompt::owns(&d.fields) || crate::replace_prompt::owns(&d.fields) {
         tl!("Replace")
     } else if d.fields.contains_key("__export") {
@@ -847,6 +850,7 @@ const ROUTES: &[fn(&Fields) -> bool] = &[
     crate::channel_options_ui::owns_new_spot,
     crate::shape_dialog::owns,
     crate::delete_layer_prompt::owns,
+    crate::ai_select::owns,
     crate::disk_change_prompt::owns,
     crate::actions::owns_insert_stop,
     crate::actions::owns_new_set,
@@ -1005,6 +1009,7 @@ fn confirm_command(app: &mut PhotocraftApp, d: Dialog) -> Result<Value, String> 
         _ if crate::channel_options_ui::owns_new_spot(&d.fields) => crate::channel_options_ui::confirm_new_spot(app, &d.fields),
         _ if crate::shape_dialog::owns(&d.fields) => crate::shape_dialog::confirm(app, &d.fields),
         _ if crate::delete_layer_prompt::owns(&d.fields) => crate::delete_layer_prompt::confirm(app, &d.fields),
+        _ if crate::ai_select::owns(&d.fields) => crate::ai_select::confirm(app, &d.fields),
         _ if crate::disk_change_prompt::owns(&d.fields) => crate::disk_change_prompt::confirm(app, &d.fields),
         _ if crate::replace_prompt::owns(&d.fields) => crate::replace_prompt::confirm(app),
         _ if crate::preset_group_prompt::owns(&d.fields) => crate::preset_group_prompt::confirm(app, &d.fields),
