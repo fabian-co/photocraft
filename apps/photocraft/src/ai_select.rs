@@ -83,11 +83,13 @@ impl AiSelect for CraftAiSelect {
 }
 
 impl CraftAiSelect {
-    /// The `image.segment` request: the picture, the words, and the hint box (or a click in the
-    /// middle when there is no hint), as the shared contract spells them.
+    /// The `image.segment` request: the picture and the hint box (or a click in the middle when
+    /// there is no hint), as the shared contract spells them. No words: every built-in route reads
+    /// a box or clicks, and the ones that select only by clicking (SAM 2.1) refuse a description,
+    /// so `r.prompt` is not sent.
     fn request(&self, r: AiSelectRequest) -> Result<Request, String> {
         let picture = Payload::inline("image/png", r.png).map_err(|e| e.message)?;
-        let request = Request::new(self.role.capability.clone()).with_input(InputRole::Source, picture).with_input(InputRole::Prompt, Payload::text(r.prompt));
+        let request = Request::new(self.role.capability.clone()).with_input(InputRole::Source, picture);
         Ok(match r.area {
             Some([x0, y0, x1, y1]) => segment::with_area(request, Area { x0, y0, x1, y1 }),
             None => segment::with_clicks(request, &[Click { x: 0.5, y: 0.5, positive: true }]),
