@@ -18,6 +18,8 @@ use crate::{PhotocraftApp, state::DialogKind};
 use base64::Engine as _;
 use serde_json::{Map, Value, json};
 
+pub(crate) mod cost;
+pub(crate) mod references;
 pub(crate) mod task_bar;
 
 const MARK: &str = "__aiSelectConsent";
@@ -51,7 +53,8 @@ pub struct AiSelectRequest {
 pub struct AiFillRequest {
     /// The picture, RGBA PNG.
     pub png: Vec<u8>,
-    /// The same size as the picture, RGBA PNG: transparent where the model should paint.
+    /// The same size as the picture, RGBA PNG: transparent where the model should paint. Empty
+    /// when nothing is selected: the description is then an edit of the whole picture.
     pub mask: Vec<u8>,
     /// The person's description.
     pub prompt: String,
@@ -60,6 +63,9 @@ pub struct AiFillRequest {
     /// The size asked of the model, `[width, height]`: the picture and the mask are this size,
     /// both sides multiples of 16.
     pub size: Option<[u32; 2]>,
+    /// Up to three reference pictures (PNG), sent after the picture in this order: the prompt
+    /// calls them images 2, 3 and 4.
+    pub references: Vec<Vec<u8>>,
 }
 
 /// A model that can do Generative Fill, for the task bar's model list.
@@ -79,6 +85,8 @@ pub struct AiModelChoice {
 pub(crate) struct FillOptions {
     pub quality: Option<String>,
     pub size: Option<[u32; 2]>,
+    /// The references' tags (without `@`) and PNGs, in the order they are sent.
+    pub references: Vec<(String, Vec<u8>)>,
 }
 
 /// What a job is for: a selection or a fill.
@@ -121,7 +129,7 @@ impl Kind {
         match self {
             Self::Subject => tl!("Select Subject with {model} sends the picture to {destination}."),
             Self::Object => tl!("Object Selection with {model} sends the picture to {destination}."),
-            Self::Fill => tl!("Generative Fill with {model} sends the picture, the selection and your description to {destination}."),
+            Self::Fill => tl!("Generative Fill with {model} sends the picture, the selection, your description and any reference pictures to {destination}."),
         }
     }
 
@@ -215,11 +223,13 @@ pub enum AiJobPoll {
     /// Still working; percent when the model reports it.
     Running(Option<u8>),
     /// The result PNG and whether the model found anything: for a selection the grayscale mask
-    /// (white selected), for a fill the picture.
+    /// (white selected), for a fill the picture. `usage` is `[input, output]` tokens when the
+    /// model reported them.
     Done {
         png: Vec<u8>,
         matched: bool,
         name: Option<String>,
+        usage: Option<[u64; 2]>,
     },
     Failed(String),
     Cancelled,
@@ -291,6 +301,8 @@ struct Running {
     model: String,
     /// The new layer's name (Generative Fill).
     name: String,
+    /// Generative Fill's request details.
+    fill: Option<FillJob>,
 }
 
 struct Awaiting {
@@ -300,15 +312,31 @@ struct Awaiting {
     mode: Value,
     model: String,
     name: String,
+    fill: Option<FillJob>,
 }
 
 /// The job's settings that are not the request.
+/// What a Generative Fill job needs back when its picture arrives.
+#[derive(Clone, Debug)]
+struct FillJob {
+    /// Where the picture goes, `[x, y, w, h]`.
+    region: Value,
+    /// The model's id (not its label) and the quality asked, for the cost.
+    model: String,
+    quality: Option<String>,
+    /// The picture's size asked, in pixels.
+    pixels: f64,
+    /// `layer.fromAiImage`'s `keep`: "changes" for an edit of the whole picture.
+    keep: &'static str,
+}
+
 struct Job {
     kind: Kind,
     document: u64,
     mode: Value,
     model: String,
     name: String,
+    fill: Option<FillJob>,
 }
 
 pub fn owns(fields: &Map<String, Value>) -> bool {
@@ -384,7 +412,7 @@ pub fn intercept(app: &mut PhotocraftApp, command: &str, params: &Value) -> Opti
     let document = source.get("document").and_then(Value::as_u64).unwrap_or(0);
     let mode = params.get("mode").cloned().unwrap_or_else(|| json!("replace"));
     let request = AiSelectRequest { png, area, click, prompt: PROMPT.into() };
-    Some(begin(app, Request::Select(request), Job { kind, document, mode, model, name: String::new() }, None))
+    Some(begin(app, Request::Select(request), Job { kind, document, mode, model, name: String::new(), fill: None }, None))
 }
 
 /// Edit › Generative Fill: with an image model ready, the prompt; without one, Preferences on
@@ -394,7 +422,8 @@ fn intercept_fill(app: &mut PhotocraftApp) -> Option<Result<Value, String>> {
         return None;
     }
     let service = app.services.ai_select.as_ref()?;
-    app.session.active()?.doc.selection.as_ref()?;
+    // Without a selection the whole canvas is painted.
+    app.session.active()?;
     if app.ai_select.running.is_some() {
         return Some(Ok(json!({"pending": true})));
     }
@@ -416,8 +445,6 @@ fn intercept_fill(app: &mut PhotocraftApp) -> Option<Result<Value, String>> {
 
 const STAGE: &str = "stage";
 const PROMPT_STAGE: &str = "prompt";
-/// What an image model is asked when the person leaves the description empty.
-const BLEND_PROMPT: &str = "Fill the transparent area so it blends naturally with the rest of the picture.";
 
 fn is_prompt(fields: &Map<String, Value>) -> bool {
     fields.get(STAGE).and_then(Value::as_str) == Some(PROMPT_STAGE)
@@ -437,6 +464,9 @@ fn confirm_fill(app: &mut PhotocraftApp, fields: &Map<String, Value>) -> Result<
 /// Sends the picture and the selection to the chosen model with `typed` (empty: match the
 /// surroundings) and the task bar's options.
 pub(crate) fn start_fill(app: &mut PhotocraftApp, typed: &str, options: FillOptions) -> Result<Value, String> {
+    if app.session.active().is_none() {
+        return Err(tl!("Open a document first").into());
+    }
     let Some(service) = app.services.ai_select.as_ref() else { return Err(tl!("Generative Fill needs an AI image model").into()) };
     let model = match service.fill_status() {
         AiSelectStatus::Ready { model } => model,
@@ -446,9 +476,16 @@ pub(crate) fn start_fill(app: &mut PhotocraftApp, typed: &str, options: FillOpti
         return Err(tl!("An AI job is already running").into());
     }
     let typed = typed.trim().to_string();
+    let mut options = options;
+    // Always ask for a size of the region's proportions: a model left to choose returns another
+    // shape, and the picture would come back stretched.
+    if options.size.is_none() {
+        options.size = auto_size(app);
+    }
+    // The selection with the picture around it (or the whole canvas), as the task bar showed.
     let params = match options.size {
-        Some([w, h]) => json!({"width": w, "height": h}),
-        None => json!({}),
+        Some([w, h]) => json!({"width": w, "height": h, "crop": true}),
+        None => json!({"crop": true}),
     };
     let source = app.run_command("edit.aiFillSource", params)?;
     let decode = |key: &str| source.get(key).and_then(Value::as_str).and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok());
@@ -457,11 +494,48 @@ pub(crate) fn start_fill(app: &mut PhotocraftApp, typed: &str, options: FillOpti
     };
     let document = source.get("document").and_then(Value::as_u64).unwrap_or(0);
     let name = if typed.is_empty() { "Generative Fill".to_string() } else { typed.chars().take(60).collect() };
-    let prompt = if typed.is_empty() { BLEND_PROMPT.to_string() } else { typed };
+    // What the selection holds decides the words: context to keep, an area to fill, or a blank
+    // canvas to create on.
+    let holds = |key: &str| references::Holds::parse(source.get(key).and_then(Value::as_str));
+    let tags: Vec<String> = options.references.iter().take(references::MAX).map(|(t, _)| t.clone()).collect();
+    // Nothing selected: the picture goes without a mask, as an instruction for all of it, and
+    // only what the model changed is kept.
+    let whole = app.session.active().is_some_and(|d| d.doc.selection.is_none());
+    let prompt = references::compose(&typed, (!whole).then(|| holds("selection")), holds("canvas"), &tags)?;
+    let mask = if whole { Vec::new() } else { mask };
     // What the engine actually made (both sides multiples of 16) is what the model is asked for.
     let sent = options.size.and_then(|_| Some([source.get("width")?.as_u64()? as u32, source.get("height")?.as_u64()? as u32]));
-    let request = AiFillRequest { png, mask, prompt, quality: options.quality, size: sent };
-    begin(app, Request::Fill(request), Job { kind: Kind::Fill, document, mode: Value::Null, model, name }, None)
+    let pictures = options.references.into_iter().take(references::MAX).map(|(_, png)| png).collect();
+    let request = AiFillRequest { png, mask, prompt, quality: options.quality, size: sent, references: pictures };
+    let region = source.get("region").cloned().unwrap_or(Value::Null);
+    let model_id = app.services.ai_select.as_ref().and_then(|s| s.fill_models().into_iter().find(|m| m.selected)).map(|m| m.model).unwrap_or_default();
+    let pixels = source.get("width").and_then(Value::as_f64).unwrap_or(0.0) * source.get("height").and_then(Value::as_f64).unwrap_or(0.0);
+    let keep = if whole && holds("canvas") == references::Holds::Content { "changes" } else { "all" };
+    let fill = FillJob { region, model: model_id, quality: request.quality.clone(), pixels, keep };
+    begin(app, Request::Fill(request), Job { kind: Kind::Fill, document, mode: Value::Null, model, name, fill: Some(fill) }, None)
+}
+
+/// The size Automatic asks of the chosen model for the active document's fill region.
+fn auto_size(app: &mut PhotocraftApp) -> Option<[u32; 2]> {
+    let model = app.services.ai_select.as_ref()?.fill_models().into_iter().find(|m| m.selected)?;
+    let d = app.session.active()?;
+    let canvas = d.doc.bounds();
+    let selection = d.doc.selection.as_ref().map(|s| s.content_bounds());
+    let region = photocraft_engine::ai_fill_cmds::fill_region(canvas, selection);
+    task_bar::resolve(task_bar::profile(&model.model), task_bar::SizeChoice::Auto, [region.width(), region.height()])
+}
+
+/// Generative Fill as an agent or a test drives it: like the task bar's Generate, with
+/// `quality` (`low`, `medium`…), the size asked of the model, and reference pictures as
+/// `(tag, PNG/JPEG/WebP bytes)`. The job runs off the interface thread; [`tick`] collects it.
+pub fn generative_fill(app: &mut PhotocraftApp, prompt: &str, quality: Option<&str>, size: Option<[u32; 2]>, pictures: Vec<(String, Vec<u8>)>) -> Result<Value, String> {
+    let mut refs = Vec::new();
+    for (tag, bytes) in pictures.into_iter().take(references::MAX) {
+        let taken: Vec<String> = refs.iter().map(|(t, _): &(String, Vec<u8>)| t.clone()).collect();
+        let r = references::load(&tag, &bytes, &taken)?;
+        refs.push((r.tag, r.png));
+    }
+    start_fill(app, prompt, FillOptions { quality: quality.map(str::to_owned), size, references: refs })
 }
 
 /// Where Object Selection asked: its rectangle `[x, y, w, h]` or its point `[x, y]`, in canvas
@@ -490,7 +564,7 @@ fn object_target(params: &Value) -> Option<ObjectTarget> {
 }
 
 fn begin(app: &mut PhotocraftApp, request: Request, job: Job, consent: Option<AiConsentTerm>) -> Result<Value, String> {
-    let Job { kind, document, mode, model, name } = job;
+    let Job { kind, document, mode, model, name, fill } = job;
     let Some(service) = app.services.ai_select.as_ref() else { return Err(tl!("AI selection is not available").into()) };
     let started = match &request {
         Request::Select(r) => service.start(r.clone(), consent),
@@ -498,7 +572,7 @@ fn begin(app: &mut PhotocraftApp, request: Request, job: Job, consent: Option<Ai
     };
     match started {
         Ok(AiSelectStart::Started(job)) => {
-            app.ai_select.running = Some(Running { job, kind, document, mode, model: model.clone(), name });
+            app.ai_select.running = Some(Running { job, kind, document, mode, model: model.clone(), name, fill });
             app.ui.status = crate::i18n::fmt(kind.working(), &[("model", &model)]);
             app.ui.status_error = false;
             Ok(json!({"pending": true, "model": model}))
@@ -507,7 +581,7 @@ fn begin(app: &mut PhotocraftApp, request: Request, job: Job, consent: Option<Ai
             if consent.is_some() {
                 return Err(tl!("The AI model still needs your agreement. Please try again.").into());
             }
-            app.ai_select.awaiting = Some(Awaiting { request, kind, document, mode, model: model.clone(), name });
+            app.ai_select.awaiting = Some(Awaiting { request, kind, document, mode, model: model.clone(), name, fill });
             if let Some(open) = app.ui.dialogs.iter().find(|d| owns(&d.fields)) {
                 return Ok(json!({"dialog": open.id, "consentPending": true}));
             }
@@ -556,15 +630,15 @@ pub fn confirm(app: &mut PhotocraftApp, fields: &Map<String, Value>) -> Result<V
         return confirm_fill(app, fields);
     }
     let term = fields.get("term").and_then(Value::as_str).and_then(AiConsentTerm::parse).unwrap_or(AiConsentTerm::ThisTime);
-    let Awaiting { request, kind, document, mode, model, name } = app.ai_select.awaiting.take().ok_or(tl!("Nothing is waiting to be sent"))?;
+    let Awaiting { request, kind, document, mode, model, name, fill } = app.ai_select.awaiting.take().ok_or(tl!("Nothing is waiting to be sent"))?;
     if app.session.active().map(|d| d.doc.id.0) != Some(document) {
         return Err(kind.again().into());
     }
-    begin(app, request, Job { kind, document, mode, model, name }, Some(term))
+    begin(app, request, Job { kind, document, mode, model, name, fill }, Some(term))
 }
 
 /// Polls the running selection; applies the mask when it arrives. Esc cancels.
-pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
+pub fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let Some(running) = app.ai_select.running.as_mut() else { return };
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         running.job.cancel();
@@ -582,19 +656,31 @@ pub(crate) fn tick(app: &mut PhotocraftApp, ctx: &egui::Context) {
             app.ui.status = message;
             app.ui.status_error = true;
         }
-        AiJobPoll::Done { png, matched, name } => {
-            let Some(Running { kind, document, mode, model, name: layer_name, .. }) = app.ai_select.running.take() else { return };
+        AiJobPoll::Done { png, matched, name, usage } => {
+            let Some(Running { kind, document, mode, model, name: layer_name, fill, .. }) = app.ai_select.running.take() else { return };
             if !matched {
                 app.ui.status = kind.nothing().into();
                 app.ui.status_error = false;
                 return;
             }
             if kind == Kind::Fill {
-                let params = json!({"png": base64::engine::general_purpose::STANDARD.encode(png), "document": document, "name": layer_name});
+                let region = fill.as_ref().map_or(Value::Null, |f| f.region.clone());
+                let keep = fill.as_ref().map_or("all", |f| f.keep);
+                let params = json!({"png": base64::engine::general_purpose::STANDARD.encode(png), "document": document, "name": layer_name, "region": region, "keep": keep});
+                // What it cost, from the tokens the model reported; it also tunes the next estimate.
+                let spent = fill.as_ref().zip(usage).and_then(|(f, [input, output])| {
+                    app.ai_select.bar.learn(&f.model, f.quality.as_deref(), f.pixels, output);
+                    cost::actual(&f.model, input, output)
+                });
                 match app.run_command("layer.fromAiImage", params) {
                     Ok(_) => {
-                        app.ui.status = crate::i18n::fmt(kind.done(), &[("model", &model)]);
+                        let done = crate::i18n::fmt(kind.done(), &[("model", &model)]);
+                        app.ui.status = match spent {
+                            Some(usd) => crate::i18n::fmt(tl!("{done} · cost about {cost}"), &[("done", &done), ("cost", &cost::dollars_label(usd))]),
+                            None => done,
+                        };
                         app.ui.status_error = false;
+                        app.ai_select.bar.last_cost = spent;
                     }
                     Err(e) => {
                         app.ui.status = e;

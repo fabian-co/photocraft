@@ -71,7 +71,7 @@ impl AiSelectJob for FakeJob {
             *v = if s.matched && i % 4 < 2 { 255 } else { 0 };
         }
         let mask_png = photocraft_codecs::encode(&image, photocraft_codecs::Format::Png, &Default::default()).unwrap();
-        AiJobPoll::Done { png: mask_png, matched: s.matched, name: None }
+        AiJobPoll::Done { png: mask_png, matched: s.matched, name: None, usage: None }
     }
     fn cancel(&mut self) {
         self.0.borrow_mut().cancelled = true;
@@ -255,7 +255,10 @@ fn generative_fill_asks_for_a_description_and_adds_one_masked_layer() {
     {
         let s = script.borrow();
         let request = &s.fills[0];
-        assert_eq!(request.prompt, "a red umbrella");
+        // A new document is blank: the model is told it may create freely, then the description.
+        assert!(request.prompt.ends_with("Description: a red umbrella"), "{}", request.prompt);
+        assert!(request.prompt.contains("blank canvas"), "{}", request.prompt);
+        assert!(request.references.is_empty());
         let mask = photocraft_codecs::decode(&request.mask).unwrap().to_rgba8();
         // Transparent where the selection is (the left half of the 40-wide canvas).
         assert_eq!(mask[3], 0);
@@ -285,8 +288,40 @@ fn generative_fill_without_a_model_opens_the_ai_preferences() {
 }
 
 #[test]
-fn generative_fill_without_a_selection_is_the_engines_to_refuse() {
+fn generative_fill_without_a_selection_paints_the_whole_canvas() {
+    let (mut app, script) = make_app(Script { fill_ready: true, matched: true, ..Default::default() });
+    let v = app.run("edit.generativeFill", json!({})).unwrap();
+    assert!(v["dialog"].as_u64().is_some(), "the prompt opens without a selection");
+    start_fill(&mut app, "a beach at sunset", FillOptions::default()).unwrap();
+    {
+        let s = script.borrow();
+        assert!(s.fills[0].mask.is_empty(), "no selection: no mask, an instruction for the whole picture");
+    }
+    tick(&mut app);
+    let d = app.session.active().unwrap();
+    let layer = d.doc.layer(d.active_layer.unwrap()).unwrap();
+    assert!(layer.mask.is_none(), "no selection, no mask");
+}
+
+#[test]
+fn generative_fill_sends_the_references_and_names_them_in_the_prompt() {
+    let (mut app, script) = make_app(Script { fill_ready: true, matched: true, ..Default::default() });
+    app.run("select.rect", json!({"x": 0, "y": 0, "width": 20, "height": 20})).unwrap();
+    let refs = vec![("dog".to_string(), vec![1u8]), ("hat".to_string(), vec![2u8]), ("sky".to_string(), vec![3u8]), ("more".to_string(), vec![4u8])];
+    let options = FillOptions { references: refs, ..Default::default() };
+    start_fill(&mut app, "the hat from @hat on @dog", options).unwrap();
+    let s = script.borrow();
+    let request = &s.fills[0];
+    assert_eq!(request.references, vec![vec![1u8], vec![2u8], vec![3u8]], "three at most, in order");
+    assert!(request.prompt.contains("@hat (image 3) on @dog (image 2)"), "{}", request.prompt);
+    assert!(request.prompt.contains("image 4 is @sky"), "{}", request.prompt);
+}
+
+#[test]
+fn generative_fill_on_a_blank_canvas_needs_words_or_a_reference() {
     let (mut app, script) = make_app(Script { fill_ready: true, ..Default::default() });
-    assert!(app.run("edit.generativeFill", json!({})).is_err());
-    assert!(script.borrow().fills.is_empty());
+    app.run("select.all", json!({})).unwrap();
+    let e = start_fill(&mut app, "  ", FillOptions::default()).unwrap_err();
+    assert!(e.contains("blank"), "{e}");
+    assert!(script.borrow().fills.is_empty(), "nothing is sent");
 }

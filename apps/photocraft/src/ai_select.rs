@@ -79,13 +79,27 @@ impl AiSelect for CraftAiSelect {
     }
 
     fn start_fill(&self, r: AiFillRequest, consent: Option<AiConsentTerm>) -> Result<AiSelectStart, String> {
-        let role = self.fill_role.as_ref().ok_or("This version of PhotoCraft has no Generative Fill tool.")?;
+        let fill = self.fill_role.as_ref().ok_or("This version of PhotoCraft has no Generative Fill tool.")?;
+        // Without a mask (nothing selected) it is an instruction for the whole picture: the same
+        // chosen model, asked for `image.edit`, which takes no mask, instead of `image.inpaint`.
+        let edit;
+        let role = if r.mask.is_empty() {
+            edit = edit_role(fill)?;
+            &edit
+        } else {
+            fill
+        };
         let picture = Payload::inline("image/png", r.png).map_err(|e| e.message)?;
-        let mask = Payload::inline("image/png", r.mask).map_err(|e| e.message)?;
-        let request = Request::new(role.capability.clone())
-            .with_input(InputRole::Source, picture)
-            .with_input(InputRole::Mask, mask)
-            .with_input(InputRole::Prompt, Payload::text(r.prompt));
+        let mut request = Request::new(role.capability.clone()).with_input(InputRole::Source, picture);
+        if !r.mask.is_empty() {
+            request = request.with_input(InputRole::Mask, Payload::inline("image/png", r.mask).map_err(|e| e.message)?);
+        }
+        let request = request.with_input(InputRole::Prompt, Payload::text(r.prompt));
+        // References follow the picture, as images 2, 3 and 4 the prompt names.
+        let mut request = request;
+        for png in r.references {
+            request = request.with_input(InputRole::Reference, Payload::inline("image/png", png).map_err(|e| e.message)?);
+        }
         // The task bar's choices, as OpenAI's images endpoints take them.
         let request = match r.size {
             Some([w, h]) => request.with_param("size", serde_json::json!(format!("{w}x{h}"))),
@@ -181,6 +195,13 @@ impl CraftAiSelect {
     }
 }
 
+/// Generative Fill's role asking its model for `image.edit` (an instruction for the whole
+/// picture, no mask) instead of `image.inpaint`: the same id, so the same chosen model.
+fn edit_role(fill: &Role) -> Result<Role, String> {
+    let capability = craft_ai_core::CapabilityId::parse("image.edit").map_err(|e| e.to_string())?;
+    Ok(Role { capability, inputs: vec![InputRole::Source, InputRole::Prompt], ..fill.clone() })
+}
+
 fn consent_term(term: AiConsentTerm) -> ConsentTerm {
     match term {
         AiConsentTerm::ThisTime => ConsentTerm::ThisTime,
@@ -264,6 +285,8 @@ fn run(client: &AiClient, plan: &Plan, ledger: &ConsentLedger, stop: &AtomicBool
     };
     let mut outputs = Vec::new();
     let mut cancel_sent = false;
+    // The tokens the model reports (`[input, output]`), for the cost shown afterwards.
+    let mut usage = None;
     loop {
         if stop.load(Ordering::Relaxed) && !cancel_sent {
             cancel_sent = true;
@@ -276,6 +299,11 @@ fn run(client: &AiClient, plan: &Plan, ledger: &ConsentLedger, stop: &AtomicBool
             Ok(s) => s,
             Err(e) => return failed(e),
         };
+        if let Some(u) = &snapshot.usage
+            && let (Some(input), Some(output)) = (u.input_units, u.output_units)
+        {
+            usage = Some([input, output]);
+        }
         outputs.extend(snapshot.events.into_iter().filter_map(|e| if let Event::Output(o) = e { Some(o) } else { None }));
         match snapshot.state {
             JobState::Queued => {}
@@ -290,7 +318,7 @@ fn run(client: &AiClient, plan: &Plan, ledger: &ConsentLedger, stop: &AtomicBool
                     _ => None,
                 });
                 return match picture {
-                    Some(png) => AiJobPoll::Done { png, matched: true, name: None },
+                    Some(png) => AiJobPoll::Done { png, matched: true, name: None, usage },
                     None => AiJobPoll::Failed("The AI model returned no picture. Try another description, or another model.".into()),
                 };
             }
@@ -298,7 +326,7 @@ fn run(client: &AiClient, plan: &Plan, ledger: &ConsentLedger, stop: &AtomicBool
                 let found = segment::read_found(&outputs);
                 return match segment::mask(&outputs) {
                     Some(Payload::Inline { data, .. }) => {
-                        AiJobPoll::Done { png: data.clone(), matched: found.as_ref().is_none_or(|f| f.matched), name: found.and_then(|f| f.name) }
+                        AiJobPoll::Done { png: data.clone(), matched: found.as_ref().is_none_or(|f| f.matched), name: found.and_then(|f| f.name), usage }
                     }
                     _ => AiJobPoll::Failed("The AI model returned no selection. Try again, or choose another model in Set up AI.".into()),
                 };
@@ -328,5 +356,88 @@ impl AiSelectJob for Worker {
 
     fn cancel(&mut self) {
         self.cancel.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Generative Fill against a real model, end to end: the task bar's path through the engine, the
+/// Craft AI layer and back into a layer. Costs money, so it only runs when asked, with a shared AI
+/// folder to use (`CRAFT_AI_DIR`, whose Generative Fill model should be a cheap one) and:
+/// `PHOTOCRAFT_LIVE_FILL_IMAGE` (a photo), `PHOTOCRAFT_LIVE_FILL_OUT` (a folder for the results),
+/// `PHOTOCRAFT_LIVE_FILL_RECT` (`x,y,w,h` to select; empty: no selection), `PHOTOCRAFT_LIVE_FILL_PROMPT`
+/// and optionally `PHOTOCRAFT_LIVE_FILL_REF` (a picture tagged by its file name) and
+/// `PHOTOCRAFT_LIVE_FILL_NAME` (the result's file name).
+#[cfg(test)]
+mod live_tests {
+    use base64::Engine as _;
+    use serde_json::{Value, json};
+
+    fn var(name: &str) -> Option<String> {
+        std::env::var(name).ok().filter(|v| !v.is_empty())
+    }
+
+    #[test]
+    #[ignore = "sends a picture to a paid AI model"]
+    fn generative_fill_on_a_real_model() {
+        let (Some(image), Some(out), Some(prompt)) = (var("PHOTOCRAFT_LIVE_FILL_IMAGE"), var("PHOTOCRAFT_LIVE_FILL_OUT"), var("PHOTOCRAFT_LIVE_FILL_PROMPT")) else {
+            panic!("set PHOTOCRAFT_LIVE_FILL_IMAGE, PHOTOCRAFT_LIVE_FILL_OUT and PHOTOCRAFT_LIVE_FILL_PROMPT");
+        };
+        let name = var("PHOTOCRAFT_LIVE_FILL_NAME").unwrap_or_else(|| "result".into());
+        let mut session = photocraft_engine::Session::new();
+        if image == "blank" {
+            session.execute("file.new", json!({"width": 1200, "height": 800})).unwrap();
+        } else {
+            let bytes = std::fs::read(&image).unwrap();
+            let decoded = photocraft_codecs::decode(&bytes).unwrap();
+            session.execute("file.new", json!({"width": decoded.width(), "height": decoded.height()})).unwrap();
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            session.execute("layer.fromAiImage", json!({"png": b64, "name": "Photo"})).unwrap();
+        }
+        if let Some(rect) = var("PHOTOCRAFT_LIVE_FILL_RECT") {
+            let n: Vec<i64> = rect.split(',').map(|v| v.trim().parse().unwrap()).collect();
+            session.execute("select.rect", json!({"x": n[0], "y": n[1], "width": n[2], "height": n[3]})).unwrap();
+        }
+        let services = photocraft_ui_egui::Services { ai_select: super::service(), ..Default::default() };
+        let mut app = photocraft_ui_egui::PhotocraftApp::new(session, services);
+        let refs = var("PHOTOCRAFT_LIVE_FILL_REF")
+            .map(|path| {
+                let tag = std::path::Path::new(&path).file_stem().unwrap().to_string_lossy().into_owned();
+                vec![(tag, std::fs::read(&path).unwrap())]
+            })
+            .unwrap_or_default();
+        let started = photocraft_ui_egui::ai_select::generative_fill(&mut app, &prompt, Some("low"), None, refs).unwrap();
+        eprintln!("started: {started}");
+        assert!(started.get("consentPending").is_none(), "agree to send pictures in this AI folder first");
+        let ctx = egui::Context::default();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+        while photocraft_ui_egui::ai_select::busy(&app) {
+            assert!(std::time::Instant::now() < deadline, "the model took too long");
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            photocraft_ui_egui::ai_select::tick(&mut app, &ctx);
+        }
+        eprintln!("status: {} (error: {})", app.ui.status, app.ui.status_error);
+        assert!(!app.ui.status_error, "{}", app.ui.status);
+        // The new layer alone, unmasked, over its bounds: what the model drew, colour-matched.
+        if let Some(d) = app.session.active()
+            && let Some(layer) = d.active_layer.and_then(|id| d.doc.layer(id))
+            && let Some(surface) = layer.surface()
+        {
+            let r = surface.content_bounds();
+            let px = surface.read_region(r);
+            let mut img = photocraft_codecs::Image::new(r.width(), r.height(), photocraft_codecs::ChannelLayout::Rgba, photocraft_codecs::SampleType::U8).unwrap();
+            for (o, v) in img.data_mut().iter_mut().zip(px) {
+                *o = (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+            let png = photocraft_codecs::encode(&img, photocraft_codecs::Format::Png, &Default::default()).unwrap();
+            std::fs::write(std::path::Path::new(&out).join(format!("{name}-layer.png")), png).unwrap();
+            eprintln!("layer bounds {r:?}");
+        }
+        // The composite, at most 1600 px on its longest side.
+        // Nothing to drop when nothing was selected.
+        let _ = app.session.execute("select.deselect", json!({}));
+        let v: Value = app.session.execute("edit.aiFillSource", json!({"crop": false, "maxSide": 1600})).unwrap();
+        let png = base64::engine::general_purpose::STANDARD.decode(v["png"].as_str().unwrap()).unwrap();
+        let path = std::path::Path::new(&out).join(format!("{name}.png"));
+        std::fs::write(&path, png).unwrap();
+        eprintln!("wrote {}", path.display());
     }
 }

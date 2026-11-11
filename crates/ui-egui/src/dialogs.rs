@@ -315,7 +315,6 @@ fn command_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, d: &Dialog, fields: 
         _ if crate::channel_options_ui::owns_new_spot(fields) => crate::channel_options_ui::new_spot_body(ui, fields),
         _ if crate::shape_dialog::owns(fields) => crate::shape_dialog::body(app, ui, fields),
         _ if owns_small_prompt(fields) => small_prompt_body(ui, fields),
-        _ if delete_prompt(fields) => delete_prompt_body(ui, fields),
         _ if crate::disk_change_prompt::owns(fields) => crate::disk_change_prompt::body(ui, fields),
         _ if crate::replace_prompt::owns(fields) => crate::replace_prompt::body(ui, fields),
         _ if crate::preset_group_prompt::owns(fields) => crate::preset_group_prompt::body(ui, fields),
@@ -554,16 +553,25 @@ fn button_row(
 /// The default button's label: what OK means for this dialog.
 /// The Delete Layer prompt and the AI prompts (Generative Fill's description, the consent
 /// question): one route in [`command_body`] and [`confirm_command`] for both.
+/// The delete confirmations ([`delete_prompt`]) share it too.
 fn owns_small_prompt(fields: &Fields) -> bool {
-    crate::delete_layer_prompt::owns(fields) || crate::ai_select::owns(fields)
+    delete_prompt(fields) || crate::ai_select::owns(fields)
 }
 
 fn small_prompt_body(ui: &mut egui::Ui, fields: &mut Fields) {
-    if crate::ai_select::owns(fields) { crate::ai_select::body(ui, fields) } else { crate::delete_layer_prompt::body(ui, fields) }
+    if crate::ai_select::owns(fields) { crate::ai_select::body(ui, fields) } else { delete_prompt_body(ui, fields) }
 }
 
 fn small_prompt_confirm(app: &mut PhotocraftApp, fields: &Fields) -> Result<Value, String> {
-    if crate::ai_select::owns(fields) { crate::ai_select::confirm(app, fields) } else { crate::delete_layer_prompt::confirm(app, fields) }
+    if crate::ai_select::owns(fields) {
+        crate::ai_select::confirm(app, fields)
+    } else if crate::analysis_ui::owns_delete_note(fields) {
+        crate::analysis_ui::confirm_delete_note(app, fields)
+    } else if crate::analysis_ui::owns_clear_notes(fields) {
+        crate::analysis_ui::confirm_clear_notes(app, fields)
+    } else {
+        crate::delete_layer_prompt::confirm(app, fields)
+    }
 }
 
 fn ok_label(d: &Dialog) -> &'static str {
@@ -1147,8 +1155,6 @@ fn confirm_command(app: &mut PhotocraftApp, d: Dialog) -> Result<Value, String> 
 fn confirm_command_more(app: &mut PhotocraftApp, d: Dialog) -> Result<Value, String> {
     match d.kind {
         _ if merge_channels_ui::owns(&d.fields) => merge_channels_ui::confirm(app, &d.fields),
-        _ if crate::analysis_ui::owns_delete_note(&d.fields) => crate::analysis_ui::confirm_delete_note(app, &d.fields),
-        _ if crate::analysis_ui::owns_clear_notes(&d.fields) => crate::analysis_ui::confirm_clear_notes(app, &d.fields),
         _ if crate::file_ui::owns(&d.fields) => crate::file_ui::confirm(app, &d.fields),
         _ if crate::new_guide_ui::owns(&d.fields) => crate::new_guide_ui::confirm(app, &d.fields),
         _ if crate::color_picker_ui::owns(&d.fields) => {

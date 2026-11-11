@@ -4566,7 +4566,7 @@ smartSvg	AI/PDF/EPS contents will be edited as SVG. Saving replaces the embedded
 	Generative Fill…	Relleno generativo…
 	Generative Fill	Relleno generativo
 	Generating with {model}… (Esc cancels)	Generando con {model}… (Esc cancela)
-	Generative Fill with {model} sends the picture, the selection and your description to {destination}.	Relleno generativo con {model} envía la imagen, la selección y tu descripción a {destination}.
+	Generative Fill with {model} sends the picture, the selection, your description and any reference pictures to {destination}.	Relleno generativo con {model} envía la imagen, la selección, tu descripción y las imágenes de referencia a {destination}.
 	Generative Fill cancelled	Relleno generativo cancelado
 	The AI model returned no picture. Try another description.	El modelo de IA no devolvió ninguna imagen. Prueba con otra descripción.
 	Generated with {model}	Generado con {model}
@@ -4587,7 +4587,7 @@ smartSvg	AI/PDF/EPS contents will be edited as SVG. Saving replaces the embedded
 	Canvas size	Tamaño del lienzo
 	Generating with {model}…	Generando con {model}…
 	Choose a model…	Elegir un modelo…
-	Describe what should appear in the selection (leave it empty to match its surroundings)	Describe lo que debe aparecer en la selección (déjalo vacío para que combine con lo que la rodea)
+	Describe what should appear in the selection (leave it empty to match its surroundings). Type @ to name a reference.	Describe lo que debe aparecer en la selección (déjalo vacío para que combine con lo que la rodea). Escribe @ para nombrar una referencia.
 	Sent at {size} px (multiples of 16)	Se envía a {size} px (múltiplos de 16)
 	Sent at the canvas's proportions, rounded to multiples of 16	Se envía con las proporciones del lienzo, redondeadas a múltiplos de 16
 	Ctrl+Enter	Ctrl+Intro
@@ -4631,3 +4631,29 @@ smartSvg	AI/PDF/EPS contents will be edited as SVG. Saving replaces the embedded
 	Content-aware fill	Relleno según el contenido
 	Sample content from part of the image and use it to fill a small area	Tomar contenido de parte de la imagen para rellenar un área pequeña
 	Reset the crop box, image rotation, and aspect ratio settings	Restablecer el cuadro de recorte, la rotación de la imagen y la proporción
+	Attach a reference to name it with @	Adjunta una referencia para nombrarla con @
+	No reference is called {tags}	Ninguna referencia se llama {tags}
+	Estimated cost: {cost} per image	Costo estimado: {cost} por imagen
+	An estimate from OpenAI's published prices for this model, size, quality and the pictures sent. What OpenAI bills can differ.	Una estimación con los precios publicados por OpenAI para este modelo, tamaño, calidad y las imágenes enviadas. Lo que OpenAI cobre puede variar.
+	Estimated cost: unknown for this model	Costo estimado: desconocido para este modelo
+	PhotoCraft knows the prices of OpenAI's image models only.	PhotoCraft solo conoce los precios de los modelos de imagen de OpenAI.
+	References	Referencias
+	Put this tag in the description	Poner esta etiqueta en la descripción
+	Remove this reference	Quitar esta referencia
+	+ Add…	+ Añadir…
+	This model takes no reference pictures	Este modelo no acepta imágenes de referencia
+	Attach up to three pictures (PNG, JPEG or WebP) and name them with @ in the description	Adjunta hasta tres imágenes (PNG, JPEG o WebP) y nómbralas con @ en la descripción
+	Three references at most	Tres referencias como máximo
+	Choose a picture file	Elige un archivo de imagen
+	That picture is too large to use as a reference	Esa imagen es demasiado grande para usarla como referencia
+	That file is not a picture PhotoCraft can read	Ese archivo no es una imagen que PhotoCraft pueda leer
+	The canvas is blank: describe what to create, or attach a reference	El lienzo está vacío: describe qué crear o adjunta una referencia
+	Describe the change, or select the area to fill	Describe el cambio o selecciona el área a rellenar
+	Whole canvas	Toda la mesa de trabajo
+	Area size	Tamaño del área
+	Open a document first	Abre un documento primero
+	Describe what to create or change on the whole canvas. Type @ to name a reference.	Describe qué crear o cambiar en toda la mesa de trabajo. Escribe @ para nombrar una referencia.
+	Optional: up to three pictures to guide the result, named with @ in the description.	Opcional: hasta tres imágenes que guíen el resultado, nombradas con @ en la descripción.
+	{done} · cost about {cost}	{done} · costó aprox. {cost}
+	Last generation cost about {cost}	La última generación costó aprox. {cost}
+	An estimate from OpenAI's prices and what your last generation with this model and quality really used. What OpenAI bills can differ.	Una estimación con los precios de OpenAI y lo que realmente consumió tu última generación con este modelo y calidad. Lo que OpenAI cobre puede variar.
